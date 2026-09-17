@@ -70,10 +70,48 @@ enum PreviewRenderer {
                                    dots: meter(part(.gpu, .gpu(0.8))))),
     ]
 
+    /// 不同图标大小放进两种高度的菜单栏（外接显示器常见的 24 点、刘海屏的 33 点），超出部分按实际情况裁掉。
+    static func scaleSheet() -> NSBitmapImageRep {
+        let scales: [CGFloat] = [0.7, 0.85, 1, 1.15, 1.3, 1.5]
+        let bars: [CGFloat] = [24, 33]
+        let columnWidth: CGFloat = 96
+        let size = CGSize(width: 110 + columnWidth * CGFloat(scales.count), height: 40 + CGFloat(bars.count) * 2 * 52)
+        let state = samples[1].1
+        return bitmap(size: size, scale: 2) { cg in
+            NSColor.white.setFill()
+            CGRect(origin: .zero, size: size).fill()
+            let font = NSFont.systemFont(ofSize: 12)
+            for (index, scale) in scales.enumerated() {
+                ("\(Int((scale * 100).rounded()))%" as NSString)
+                    .draw(at: CGPoint(x: 110 + CGFloat(index) * columnWidth + 30, y: 12), withAttributes: [.font: font])
+            }
+            var y: CGFloat = 40
+            for bar in bars {
+                for dark in [false, true] {
+                    ("菜单栏 \(Int(bar)) 点" as NSString).draw(at: CGPoint(x: 10, y: y + bar / 2 - 8), withAttributes: [.font: font])
+                    for (index, scale) in scales.enumerated() {
+                        let strip = CGRect(x: 110 + CGFloat(index) * columnWidth, y: y, width: columnWidth - 10, height: bar)
+                        (dark ? NSColor(white: 0.14, alpha: 1) : NSColor(white: 0.93, alpha: 1)).setFill()
+                        strip.fill()
+                        let icon = MenuBarIcon.image(for: state, scale: scale)
+                        let rect = CGRect(x: strip.midX - icon.size.width / 2, y: strip.midY - icon.size.height / 2,
+                                          width: icon.size.width, height: icon.size.height)
+                        cg.saveGState()
+                        cg.clip(to: strip)
+                        drawIcon(icon, in: rect, dark: dark)
+                        cg.restoreGState()
+                    }
+                    y += 52
+                }
+            }
+        }
+    }
+
     static func renderAll(to directory: URL) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         write(iconSheet(), to: directory.appendingPathComponent("icons.png"))
         write(percentTransitionSheet(), to: directory.appendingPathComponent("percent-transition.png"))
+        write(scaleSheet(), to: directory.appendingPathComponent("scales.png"))
         render(splitSheet(), to: directory.appendingPathComponent("split.png"))
 
         // 面板用本机的真实数据，等网络状态回调先到。

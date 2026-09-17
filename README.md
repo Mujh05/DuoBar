@@ -8,13 +8,19 @@
 
 ## 下载和安装
 
-从 [GitHub Releases](https://github.com/Mujh05/DuoBar/releases/latest) 下载 `DuoBar-1.0-arm64.dmg`。当前版本需要 macOS 14 或更高版本，仅支持 Apple Silicon（M1 及后续芯片）。
+从 [GitHub Releases](https://github.com/Mujh05/DuoBar/releases/latest) 下载 `DuoBar-1.1-arm64.dmg`。当前版本需要 macOS 14 或更高版本，仅支持 Apple Silicon（M1 及后续芯片）。
 
 1. 打开 DMG，把 DuoBar 拖到 Applications。
 2. 第一次启动时，在“应用程序”中右键 DuoBar，选择“打开”，再确认打开。
 3. 如果仍被拦截，前往“系统设置 › 隐私与安全性”，找到 DuoBar 的提示并点“仍要打开”。
 
 当前安装包使用 ad-hoc 签名，尚未经过 Apple 公证，因此直接双击时可能被 Gatekeeper 拦截。这不代表 DMG 已损坏；后续版本会在具备 Developer ID 签名和公证条件后改善安装体验。
+
+## 更新
+
+从 1.1 开始，DuoBar 每天向 GitHub 查询一次有没有新版本，只请求公开的发布信息，不发送任何个人数据，也可以在设置的“更新”里关掉或手动检查。发现新版本时面板里会出现提示：点“下载并安装”，DuoBar 会把 DMG 下载到“下载”文件夹，按发布说明里的 SHA-256 校验后打开，然后退出自己，把新版本拖进“应用程序”替换即可。
+
+1.0 还没有这个功能，需要手动下载一次新版本。
 
 ## 三个位置
 
@@ -62,19 +68,45 @@ Wi-Fi 信号的档位：≥ −55 dBm 4 格，≥ −65 dBm 3 格，≥ −75 dB
 
 没有颜色时，菜单栏图标是系统的模板图像，深浅由系统处理；带颜色时 DuoBar 会按菜单栏的深浅自己选择黑色或白色。
 
+## Wi-Fi 控制
+
+在面板里点网络图标（网络没放在图标上时，点底部的 Wi-Fi 按钮），可以直接开关 Wi-Fi、查看附近的网络并切换，关掉系统自带的 Wi-Fi 图标后也不影响日常使用：
+
+- 当前网络打勾显示；系统里保存过的网络列在“已知网络”，其他网络收在“其他网络”里，面板开着时每 15 秒刷新一次
+- 点已知网络直接切换；新的加密网络会弹出系统对话框输入密码，密码直接交给系统，DuoBar 不保存
+- 需要账号登录的企业网络（802.1X）请在“Wi-Fi 设置…”里加入
+- macOS 只把网络名称提供给有定位权限的 App；读不到名称时，面板里会出现授权按钮
+- 不需要的话，可以在设置的“通用”里关掉这一部分
+
 ## 面板和设置
 
-点击菜单栏图标会弹出面板，三合一图标会像 iPhone Duo 打开控制中心那样拆开：圆点变成信号格或一排指示灯图标、中间内容居中、外圈变成电池（放的不是电量时变成带图标的小圆环），下面列出这几项的详细信息。点面板外面任意位置会关闭面板。
+点击菜单栏图标会弹出面板，三合一图标会像 iPhone Duo 打开控制中心那样拆开：圆点变成信号格或一排指示灯图标、中间内容居中、外圈变成电池（放的不是电量时变成带图标的小圆环）。面板平时只显示这三个图标，点其中一个，下面才展开它的详情和相应的设置，再点一次收起：
+
+| 点的图标 | 展开的内容 |
+| --- | --- |
+| 网络 | Wi-Fi 开关、信号摘要、附近的网络（见上一节） |
+| 电量 | 电量、状态、剩余时间，“电池设置…” |
+| 音量 | 音量滑块、静音按钮、输出设备，“声音设置…” |
+| 指示灯 | 每个指示灯的状态；Wi-Fi 和静音可以直接开关 |
+| CPU、GPU、内存、网速 | 详细数值，“打开活动监视器” |
+| 磁盘、蓝牙外设 | 详细数值，“存储空间…” / “蓝牙设置…” |
+
+点面板外面任意位置会关闭面板，下次打开时详情会收起。
 
 ![拆分动画逐帧](docs/split.png)
 
-面板里的“自定义图标…”会打开设置窗口：
+面板里的“自定义图标…”会打开设置窗口，左侧分成 6 页：
 
-- **图标布局**：三个位置各选一种内容；按住一行拖到另一行上，可以交换两个位置或两个圆点
-- **颜色**：上面的几个开关
-- **可显示的状态 / 可用的指示灯**：全部选项的说明和实时状态；右键一行可以直接放到某个位置
-- **菜单栏**：电量百分比可以不显示、在图标左侧显示（低电量时 / 始终），或嵌入圆环顶部；切换圆环样式时会平滑让出数字的位置；也可以打开“系统设置 › 菜单栏”
-- **通用**：登录时自动启动
+| 页面 | 内容 |
+| --- | --- |
+| 图标 | 动态预览（点一下播放展开动画，右边是浅色和深色菜单栏里的样子）、三个位置（按住一行拖到另一行上可以交换）、图标大小（70%–150% 无级调节）、颜色 |
+| 状态 | 9 种状态的卡片，带实时数值和小圆环；右上角的菜单或右键可以把它放到某个位置 |
+| 指示灯 | 4 个圆点卡槽，可以把下面的指示灯直接拖进去，圆点之间也能拖动交换 |
+| 菜单栏 | 电量百分比的 4 种样式（带预览）、⌘ 拖动调整位置的演示、打开“系统设置 › 菜单栏” |
+| 更新 | 当前版本、手动检查、每天自动检查 |
+| 通用 | 面板里的 Wi-Fi 控制、登录时自动启动、关于 |
+
+切换页面、数值变化、选择选项时都有过渡动画；系统开启“减弱动态效果”时，循环播放的装饰动画会关掉。
 
 只有正在显示的内容才会采样；打开设置窗口时会采样全部内容，方便对照（蓝牙除外，没授权时不会因此弹出权限框）。
 
@@ -84,12 +116,15 @@ macOS 不允许其他 App 移除系统的 Wi-Fi 和电池图标。在 DuoBar 设
 
 ## 从源码构建
 
-需要 macOS 14 或更高版本，以及 Xcode 或 Swift 6 工具链。
+需要 macOS 14 或更高版本和 Xcode（SwiftUI 的宏插件只随 Xcode 提供，单独的 Command Line Tools 编译不了）。当前开发工具是 Command Line Tools 时，构建脚本会自动改用 `/Applications/Xcode.app` 的工具链。
 
 ```bash
 scripts/build.sh            # 生成 build/DuoBar.app
 scripts/build.sh --install  # 装到 ~/Applications 并启动
+scripts/package.sh          # 生成 build/DuoBar-<版本>-arm64.dmg 并打印 SHA-256
 ```
+
+发布新版本时，把 `Resources/Info.plist` 里的版本号改好，标签写成 `v<版本>`，并在发布说明里附上一行 ``SHA-256: `<哈希>` ``，应用内更新会用它校验下载的安装包。
 
 如果想开启“登录时自动启动”，建议先用 `--install` 装到固定位置。
 
@@ -97,7 +132,7 @@ scripts/build.sh --install  # 装到 ~/Applications 并启动
 
 - 除了下面两项，所有状态都通过公开接口读取，不需要任何权限。
 - 蓝牙：只有用到“蓝牙”指示灯时才会申请。
-- Wi-Fi 名称：macOS 只把它提供给有定位权限的 App。只有在面板里点“显示名称”时才会申请，DuoBar 不会读取你的位置。
+- Wi-Fi 网络名称：macOS 只把它提供给有定位权限的 App。只有在面板里点授权按钮时才会申请，DuoBar 不会读取你的位置。
 - 发布的安装包和本地构建目前都使用 ad-hoc 签名，重新构建后 macOS 可能会要求重新授权。
 
 ## 开发
@@ -105,8 +140,14 @@ scripts/build.sh --install  # 装到 ~/Applications 并启动
 ```bash
 swift build
 .build/debug/DuoBar --render-previews build/previews   # 把各种布局和状态画成 PNG（docs 里的图就是这样生成的）
-build/DuoBar.app/Contents/MacOS/DuoBar --debug-snapshot build/snapshots
-# 启动后依次截下菜单栏按钮、面板动画的几帧和设置窗口，然后退出
+
+# 下面几个调试参数用 open 启动：直接运行可执行文件时，蓝牙、定位等权限会算到终端头上，可能被系统强制结束
+open -n -W --stdout build/out.txt build/DuoBar.app --args --debug-snapshot "$PWD/build/snapshots"
+# 截下菜单栏按钮、面板动画的几帧和设置窗口，然后退出
+open -n -W --stdout build/out.txt build/DuoBar.app --args --debug-wifi
+# 只读检查 Wi-Fi 扫描和网络名称，不改变任何 Wi-Fi 状态
+open -n -W --stdout build/out.txt build/DuoBar.app --args --debug-update "$PWD/build/updates"
+# 查询最新版本，把安装包下载到指定目录并校验 SHA-256
 ```
 
 | 文件 | 内容 |
@@ -120,6 +161,9 @@ build/DuoBar.app/Contents/MacOS/DuoBar --debug-snapshot build/snapshots
 | `MarkRenderers.swift` | 同一套绘制指令分别画到 Core Graphics（菜单栏）和 SwiftUI Canvas（面板、设置） |
 | `TextPath.swift` | 把数字转成轮廓路径 |
 | `SplitGlyphView.swift` | 面板顶部的拆分动画 |
-| `PanelView.swift` / `SettingsView.swift` / `StatusController.swift` | 弹出面板、设置窗口、菜单栏按钮 |
+| `WiFiControl.swift` / `WiFiSection.swift` | Wi-Fi 开关、扫描和加入网络，以及面板里对应的界面 |
+| `UpdateChecker.swift` | 通过 GitHub Releases 检查、下载并校验新版本 |
+| `PanelView.swift` / `StatusController.swift` | 弹出面板、菜单栏按钮 |
+| `SettingsWindow.swift` / `Settings*Page*.swift` / `SettingsComponents.swift` | 设置窗口的分页、各页内容和共用部件 |
 
-图标比例是从新闻配图里的 iPhone Duo 图标量出来的，以圆环半径 R 为单位：圆环线宽 0.156R，底部开口约 119°，4 个圆点直径 0.22R、每隔 20° 排在同一圆周上，Wi-Fi 扇形张角 80°。菜单栏里的图标只有十几个点高，所以线条会稍微加粗（见 `DuoStyle.menuBar`）。
+图标比例是从新闻配图里的 iPhone Duo 图标量出来的，以圆环半径 R 为单位：圆环线宽 0.156R，底部开口约 119°，4 个圆点直径 0.22R、每隔 20° 排在同一圆周上，Wi-Fi 扇形张角 80°。菜单栏里的图标只有十几个点高，所以线条会稍微加粗；图标放大后线条再逐渐回到原始比例（见 `DuoStyle.menuBar(scale:)`）。

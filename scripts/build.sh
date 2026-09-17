@@ -7,6 +7,11 @@ set -euo pipefail
 ROOT="${0:A:h:h}"
 cd "$ROOT"
 
+# SwiftUI 的宏插件只在 Xcode 里有。当前开发工具是 Command Line Tools 时，改用 Xcode 的工具链。
+if [[ -z "${DEVELOPER_DIR:-}" && "$(xcode-select -p)" == *CommandLineTools* && -d /Applications/Xcode.app ]]; then
+  export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
+
 swift build -c release
 BIN="$(swift build -c release --show-bin-path)/DuoBar"
 APP="$ROOT/build/DuoBar.app"

@@ -235,6 +235,34 @@ enum AudioReader {
     }
 }
 
+extension AudioReader {
+    /// 设置默认输出设备的音量（0...1），设备不能调音量时返回 false。
+    @discardableResult
+    static func setVolume(_ level: Double) -> Bool {
+        var value = Float32(min(max(level, 0), 1))
+        return set(kAudioHardwareServiceDeviceProperty_VirtualMainVolume, to: &value)
+    }
+
+    @discardableResult
+    static func setMuted(_ muted: Bool) -> Bool {
+        var value = UInt32(muted ? 1 : 0)
+        return set(kAudioDevicePropertyMute, to: &value)
+    }
+
+    private static func set<Value: BitwiseCopyable>(_ selector: AudioObjectPropertySelector, to value: inout Value) -> Bool {
+        guard let device = defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) else { return false }
+        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeOutput,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var settable: DarwinBoolean = false
+        guard AudioObjectHasProperty(device, &address),
+              AudioObjectIsPropertySettable(device, &address, &settable) == noErr, settable.boolValue
+        else { return false }
+        return withUnsafeBytes(of: &value) { bytes in
+            AudioObjectSetPropertyData(device, &address, 0, nil, UInt32(bytes.count), bytes.baseAddress!)
+        } == noErr
+    }
+}
+
 enum MicrophoneReader {
     /// 任何进程在用默认输入设备时为 true。读取这个状态不需要麦克风权限。
     static func inUse() -> Bool? {

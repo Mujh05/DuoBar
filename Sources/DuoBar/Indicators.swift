@@ -154,14 +154,16 @@ enum Glyphs {
 /// 设置和面板里用的指示灯小图标。
 struct IndicatorIcon: View {
     let kind: IndicatorKind
+    /// 蓝牙标志的高度；SF Symbols 跟随外面设置的字体大小。
+    var size: CGFloat = 14
 
     var body: some View {
         if let symbol = kind.symbol {
             Image(systemName: symbol)
         } else {
             BluetoothRuneShape()
-                .stroke(style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round))
-                .frame(width: 10, height: 14)
+                .stroke(style: StrokeStyle(lineWidth: size * 0.1, lineCap: .round, lineJoin: .round))
+                .frame(width: size * 0.7, height: size)
         }
     }
 }
