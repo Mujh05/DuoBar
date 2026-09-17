@@ -8,7 +8,7 @@
 
 ## 下载和安装
 
-从 [GitHub Releases](https://github.com/Mujh05/DuoBar/releases/latest) 下载 `DuoBar-1.1-arm64.dmg`。当前版本需要 macOS 14 或更高版本，仅支持 Apple Silicon（M1 及后续芯片）。
+从 [GitHub Releases](https://github.com/Mujh05/DuoBar/releases/latest) 下载 `DuoBar-1.1.1-arm64.dmg`。当前版本需要 macOS 14 或更高版本，仅支持 Apple Silicon（M1 及后续芯片）。
 
 1. 打开 DMG，把 DuoBar 拖到 Applications。
 2. 第一次启动时，在“应用程序”中右键 DuoBar，选择“打开”，再确认打开。
