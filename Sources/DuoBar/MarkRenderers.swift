@@ -33,21 +33,20 @@ enum CGMarkRenderer {
                 cg.restoreGState()
 
             case let .symbol(name, rect, variable):
-                guard let image = SymbolCache.image(name, height: rect.height, variable: variable) else { continue }
-                let target = SymbolCache.fitted(image.size, in: rect)
+                guard let symbol = SymbolCache.placed(name, in: rect, variable: variable) else { continue }
                 cg.saveGState()
                 cg.beginTransparencyLayer(auxiliaryInfo: nil)
-                drawImage(image, in: target, cg: cg, operation: .sourceOver)
+                drawImage(symbol.image, in: symbol.frame, cg: cg, operation: .sourceOver)
                 // 模板符号的像素颜色不一定是想要的颜色，统一染色。
                 cg.setBlendMode(.sourceIn)
                 cg.setFillColor(ink)
-                cg.fill(target)
+                cg.fill(symbol.frame)
                 cg.endTransparencyLayer()
                 cg.restoreGState()
 
             case let .knockoutSymbol(name, rect):
-                guard let image = SymbolCache.image(name, height: rect.height) else { continue }
-                drawImage(image, in: SymbolCache.fitted(image.size, in: rect), cg: cg, operation: .destinationOut)
+                guard let symbol = SymbolCache.placed(name, in: rect) else { continue }
+                drawImage(symbol.image, in: symbol.frame, cg: cg, operation: .destinationOut)
 
             case let .layer(alpha, children):
                 cg.saveGState()
@@ -99,21 +98,20 @@ extension GraphicsContext {
 
             case let .symbol(name, rect, variable):
                 // SF Symbol 的 NSImage 在 Canvas 里不认 shading，用它当遮罩再填色。
-                guard let symbol = SymbolCache.image(name, height: rect.height, variable: variable) else { continue }
-                let image = resolve(Image(nsImage: symbol))
-                let target = SymbolCache.fitted(image.size, in: rect)
+                guard let symbol = SymbolCache.placed(name, in: rect, variable: variable) else { continue }
+                let image = resolve(Image(nsImage: symbol.image))
                 var context = self
                 context.clipToLayer { layer in
-                    layer.draw(image, in: target)
+                    layer.draw(image, in: symbol.frame)
                 }
-                context.fill(Path(target), with: .color(color))
+                context.fill(Path(symbol.frame), with: .color(color))
 
             case let .knockoutSymbol(name, rect):
-                guard let symbol = SymbolCache.image(name, height: rect.height) else { continue }
-                let image = resolve(Image(nsImage: symbol))
+                guard let symbol = SymbolCache.placed(name, in: rect) else { continue }
+                let image = resolve(Image(nsImage: symbol.image))
                 var context = self
                 context.blendMode = .destinationOut
-                context.draw(image, in: SymbolCache.fitted(image.size, in: rect))
+                context.draw(image, in: symbol.frame)
 
             case let .layer(alpha, children):
                 var context = self
