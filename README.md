@@ -4,6 +4,18 @@
 
 ![各种布局和状态下的菜单栏图标](docs/icons.png)
 
+> DuoBar 是独立的非官方项目，与 Apple Inc. 没有关联。
+
+## 下载和安装
+
+从 [GitHub Releases](https://github.com/Mujh05/DuoBar/releases/latest) 下载 `DuoBar-1.0-arm64.dmg`。当前版本需要 macOS 14 或更高版本，仅支持 Apple Silicon（M1 及后续芯片）。
+
+1. 打开 DMG，把 DuoBar 拖到 Applications。
+2. 第一次启动时，在“应用程序”中右键 DuoBar，选择“打开”，再确认打开。
+3. 如果仍被拦截，前往“系统设置 › 隐私与安全性”，找到 DuoBar 的提示并点“仍要打开”。
+
+当前安装包使用 ad-hoc 签名，尚未经过 Apple 公证，因此直接双击时可能被 Gatekeeper 拦截。这不代表 DMG 已损坏；后续版本会在具备 Developer ID 签名和公证条件后改善安装体验。
+
 ## 三个位置
 
 | 位置 | 怎么显示 |
@@ -70,7 +82,7 @@ Wi-Fi 信号的档位：≥ −55 dBm 4 格，≥ −65 dBm 3 格，≥ −75 dB
 
 macOS 不允许其他 App 移除系统的 Wi-Fi 和电池图标。在 DuoBar 设置里点“打开菜单栏设置…”，或者直接打开“系统设置 › 菜单栏”，把 Wi-Fi 和电池设成不在菜单栏显示即可。
 
-## 构建和安装
+## 从源码构建
 
 需要 macOS 14 或更高版本，以及 Xcode 或 Swift 6 工具链。
 
@@ -86,7 +98,7 @@ scripts/build.sh --install  # 装到 ~/Applications 并启动
 - 除了下面两项，所有状态都通过公开接口读取，不需要任何权限。
 - 蓝牙：只有用到“蓝牙”指示灯时才会申请。
 - Wi-Fi 名称：macOS 只把它提供给有定位权限的 App。只有在面板里点“显示名称”时才会申请，DuoBar 不会读取你的位置。
-- 应用使用 ad-hoc 签名，重新构建后 macOS 可能会要求重新授权。
+- 发布的安装包和本地构建目前都使用 ad-hoc 签名，重新构建后 macOS 可能会要求重新授权。
 
 ## 开发
 
