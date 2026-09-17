@@ -35,7 +35,30 @@ final class StatusController: NSObject, NSPopoverDelegate {
             self?.popover.performClose(nil)
             self?.settings.show()
         }
+        model.askPassword = { [weak self] ssid in
+            self?.promptPassword(for: ssid)
+        }
+        model.onClosePanel = { [weak self] in
+            self?.popover.performClose(nil)
+        }
         configureButton()
+    }
+
+    /// 用系统的对话框问 Wi-Fi 密码。密码直接交给 CoreWLAN，DuoBar 不保存。
+    private func promptPassword(for ssid: String) -> String? {
+        popover.performClose(nil)
+        let alert = NSAlert()
+        alert.messageText = "输入“\(ssid)”的密码"
+        alert.informativeText = "密码会直接交给系统用来加入这个网络，DuoBar 本身不会保存。"
+        alert.addButton(withTitle: "加入")
+        alert.addButton(withTitle: "取消")
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.placeholderString = "密码"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        NSApp.activate()
+        guard alert.runModal() == .alertFirstButtonReturn, !field.stringValue.isEmpty else { return nil }
+        return field.stringValue
     }
 
     private static func makeStatusItem() -> NSStatusItem {
@@ -81,7 +104,8 @@ final class StatusController: NSObject, NSPopoverDelegate {
         guard let button = statusItem.button else { return }
         let state = state ?? model.iconState
         let percent = availablePercent ?? (model.battery.hasBattery && state.ring != nil ? model.battery.percent : nil)
-        button.image = MenuBarIcon.image(for: state, embeddedPercent: percent,
+        button.image = MenuBarIcon.image(for: state, scale: CGFloat(model.iconScale),
+                                         embeddedPercent: percent,
                                          embeddedPercentProgress: embeddedPercentProgress)
 
         // 从圆环样式切回左侧文字时，等圆环收拢后再显示文字，避免两个数字短暂重叠。
@@ -155,9 +179,12 @@ final class StatusController: NSObject, NSPopoverDelegate {
         Self.snapshot(button, to: directory.appendingPathComponent("statusitem.png"))
         print("status item frame:", button.window?.frame ?? .zero, "appearance:", button.effectiveAppearance.name.rawValue)
 
+        if ProcessInfo.processInfo.environment["DUOBAR_PRETEND_VERSION"] != nil {
+            await model.checkForUpdates(manual: true)
+        }
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         var elapsed = 0.0
-        for moment in [0.15, 0.35, 0.55, 2.0] {
+        for moment in [0.15, 0.35, 0.55, 3.0] {
             try? await Task.sleep(for: .seconds(moment - elapsed))
             elapsed = moment
             if let view = popover.contentViewController?.view {
@@ -167,6 +194,12 @@ final class StatusController: NSObject, NSPopoverDelegate {
         print("popover size:", popover.contentSize)
         popover.performClose(nil)
 
+        // 每个位置展开后的样子（面板打开时扫描到的网络还留着）。
+        for slot in Slot.allCases where model.layout[slot] != nil {
+            await snapshotOffscreen(PanelView(model: model, previewSplit: true, previewTab: .slot(slot)),
+                                    width: 320, to: directory.appendingPathComponent("panel-tab-\(slot).png"))
+        }
+
         // 设置窗口：等采样把所有状态都读一遍再截图。
         settings.show(activate: false)
         try? await Task.sleep(for: .seconds(2.5))
@@ -174,17 +207,37 @@ final class StatusController: NSObject, NSPopoverDelegate {
             Self.snapshot(view, to: directory.appendingPathComponent("settings.png"))
         }
 
-        // 完整高度的设置页：放在屏幕外的窗口里渲染，不用滚动。
-        let offscreen = NSWindow(contentRect: NSRect(x: -4000, y: -4000, width: 520, height: 3000),
-                                 styleMask: [.borderless], backing: .buffered, defer: false)
-        offscreen.isReleasedWhenClosed = false
-        let full = NSHostingView(rootView: SettingsView(model: model))
-        offscreen.contentView = full
-        offscreen.orderFront(nil)
-        try? await Task.sleep(for: .seconds(0.8))
-        Self.snapshot(full, to: directory.appendingPathComponent("settings-full.png"))
-        offscreen.orderOut(nil)
+        // 每一页的完整内容：放在屏幕外足够高的窗口里渲染，不用滚动。“图标”页再渲染一张深色的。
+        let pages = SettingsPage.allCases.map { ($0, false) } + [(SettingsPage.icon, true)]
+        for (page, dark) in pages {
+            let height: CGFloat = page == .icon || page == .indicators || page == .metrics ? 1300 : 800
+            let window = NSWindow(contentRect: NSRect(x: -4000, y: -4000, width: 780, height: height),
+                                  styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            if dark { window.appearance = NSAppearance(named: .darkAqua) }
+            let host = NSHostingView(rootView: SettingsRoot(model: model, page: page))
+            window.contentView = host
+            window.orderFront(nil)
+            try? await Task.sleep(for: .seconds(page == .icon ? 1.2 : 0.8))
+            let name = "settings-\(page.rawValue)\(dark ? "-dark" : "").png"
+            Self.snapshot(host, to: directory.appendingPathComponent(name))
+            window.orderOut(nil)
+        }
         settings.close()
+    }
+
+    /// 放在屏幕外的窗口里按理想高度渲染，AppKit 控件也能正常画出来。
+    private func snapshotOffscreen(_ root: some View, width: CGFloat, to url: URL) async {
+        let host = NSHostingView(rootView: root)
+        let height = max(host.fittingSize.height, 100)
+        let window = NSWindow(contentRect: NSRect(x: -4000, y: -4000, width: width, height: height),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFront(nil)
+        try? await Task.sleep(for: .seconds(0.6))
+        Self.snapshot(host, to: url)
+        window.orderOut(nil)
     }
 
     private static func snapshot(_ view: NSView, to url: URL) {

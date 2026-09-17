@@ -62,6 +62,25 @@ extension IndicatorKind {
     }
 }
 
+/// 系统设置里的面板。
+enum SettingsPane: String, Sendable {
+    case wifi = "com.apple.wifi-settings-extension"
+    case network = "com.apple.Network-Settings.extension"
+    case battery = "com.apple.Battery-Settings.extension"
+    case sound = "com.apple.Sound-Settings.extension"
+    case bluetooth = "com.apple.BluetoothSettings"
+    case storage = "com.apple.settings.Storage"
+    case menuBar = "com.apple.ControlCenter-Settings.extension"
+}
+
+enum UpdateStatus: Equatable, Sendable {
+    case idle
+    case checking
+    case upToDate
+    case available(ReleaseInfo)
+    case downloading(ReleaseInfo)
+}
+
 /// 面板里的一节详情。
 enum DetailSection: Hashable, Identifiable, Sendable {
     case metric(MetricKind)
@@ -112,6 +131,19 @@ final class AppModel {
         didSet { save(indicatorColors, Keys.indicatorColors) }
     }
 
+    /// 菜单栏图标大小，1 为 100%，可以无级调节。
+    var iconScale: Double {
+        didSet { save(iconScale, Keys.iconScale) }
+    }
+
+    /// 面板里显示 Wi-Fi 开关和附近的网络。
+    var showWiFiControls: Bool {
+        didSet {
+            save(showWiFiControls, Keys.showWiFiControls)
+            updateWiFiScanning()
+        }
+    }
+
     /// 面板是否打开。打开时网络信息刷新得更勤。
     var panelVisible = false {
         didSet {
@@ -121,9 +153,43 @@ final class AppModel {
                 networkMonitor.refresh()
                 bluetoothAccess = BluetoothMonitor.access
                 refreshLoginItem()
+            } else {
+                wifiMessage = nil
             }
+            updateWiFiScanning()
         }
     }
+
+    // MARK: 更新
+
+    /// 每天向 GitHub 查询一次新版本。
+    var autoCheckUpdates: Bool {
+        didSet {
+            Self.defaults.set(autoCheckUpdates, forKey: Keys.autoCheckUpdates)
+            scheduleUpdateChecks()
+        }
+    }
+
+    private(set) var updateStatus = UpdateStatus.idle
+    /// 最近一次检查或下载失败的原因（只在手动操作时显示）。
+    private(set) var updateMessage: String?
+    private(set) var lastUpdateCheck: Date?
+    /// 用户选择跳过的版本，面板里不再提示；手动检查时仍会显示。
+    private(set) var skippedVersion: String?
+
+    // MARK: Wi-Fi 控制的状态
+
+    /// 附近的网络，按信号强弱排序。
+    private(set) var wifiNetworks: [WiFiNetwork] = []
+    /// 扫描到了但 macOS 隐藏了名称的网络数量；大于 0 说明需要定位权限。
+    private(set) var wifiUnnamedCount = 0
+    private(set) var wifiScanning = false
+    /// 正在打开或关闭 Wi-Fi。
+    private(set) var wifiSwitching = false
+    /// 正在加入的网络。
+    private(set) var joiningSSID: String?
+    /// 最近一次 Wi-Fi 操作失败的原因。
+    private(set) var wifiMessage: String?
 
     /// 设置窗口打开时，所有状态都采样，方便对照。
     var settingsVisible = false {
@@ -137,6 +203,12 @@ final class AppModel {
     /// 菜单栏图标需要重画时调用。
     @ObservationIgnored var onIconChange: (() -> Void)?
     @ObservationIgnored var onOpenSettings: (() -> Void)?
+    /// 询问某个网络的密码；返回 nil 表示用户取消。
+    @ObservationIgnored var askPassword: ((String) -> String?)?
+    /// 打开其他 App 或系统设置后收起面板。
+    @ObservationIgnored var onClosePanel: (() -> Void)?
+    @ObservationIgnored private var wifiScanTask: Task<Void, Never>?
+    @ObservationIgnored private var updateTask: Task<Void, Never>?
 
     @ObservationIgnored private let batteryMonitor = BatteryMonitor()
     @ObservationIgnored private let networkMonitor = NetworkMonitor()
@@ -158,6 +230,11 @@ final class AppModel {
         static let batteryColors = "batteryColors"
         static let chargingGreen = "chargingGreen"
         static let indicatorColors = "indicatorColors"
+        static let iconScale = "iconScale"
+        static let showWiFiControls = "showWiFiControls"
+        static let autoCheckUpdates = "autoCheckUpdates"
+        static let lastUpdateCheck = "lastUpdateCheck"
+        static let skippedVersion = "skippedVersion"
     }
 
     init() {
@@ -167,6 +244,12 @@ final class AppModel {
         batteryColors = defaults.object(forKey: Keys.batteryColors) as? Bool ?? true
         chargingGreen = defaults.object(forKey: Keys.chargingGreen) as? Bool ?? true
         indicatorColors = defaults.object(forKey: Keys.indicatorColors) as? Bool ?? true
+        let range = MenuBarIcon.scaleRange
+        iconScale = min(max(defaults.object(forKey: Keys.iconScale) as? Double ?? 1, range.lowerBound), range.upperBound)
+        showWiFiControls = defaults.object(forKey: Keys.showWiFiControls) as? Bool ?? true
+        autoCheckUpdates = defaults.object(forKey: Keys.autoCheckUpdates) as? Bool ?? true
+        lastUpdateCheck = defaults.object(forKey: Keys.lastUpdateCheck) as? Date
+        skippedVersion = defaults.string(forKey: Keys.skippedVersion)
     }
 
     private func save(_ value: Any, _ key: String) {
@@ -182,8 +265,13 @@ final class AppModel {
             self?.setIndicator(.bluetooth, on)
         }
         location.onChange = { [weak self] state in
-            self?.ssidAccess = state
-            self?.networkMonitor.refresh()
+            guard let self else { return }
+            ssidAccess = state
+            networkMonitor.refresh()
+            // 刚授权时立刻重新扫描，把网络名称显示出来。
+            if panelVisible, showWiFiControls, network.wifiPowered {
+                Task { await self.scanWiFi() }
+            }
         }
         ssidAccess = location.state
         batteryMonitor.start()
@@ -193,6 +281,7 @@ final class AppModel {
         apply(networkMonitor.info)
         refreshSources()
         refreshLoginItem()
+        scheduleUpdateChecks()
     }
 
     // MARK: - 图标
@@ -315,7 +404,34 @@ final class AppModel {
 
     /// 打开“系统设置 › 菜单栏”，用户可以在那里隐藏系统自带的 Wi-Fi 和电池图标。
     func openMenuBarSettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension")!)
+        openSystemSettings(.menuBar)
+    }
+
+    func openSystemSettings(_ pane: SettingsPane) {
+        onClosePanel?()
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:\(pane.rawValue)")!)
+    }
+
+    func openActivityMonitor() {
+        onClosePanel?()
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app"),
+                                           configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    // MARK: - 声音
+
+    /// 拖动音量时顺便取消静音，和系统的音量键一样。
+    func setVolume(_ level: Double) {
+        if indicatorStates[.muted] == true {
+            AudioReader.setMuted(false)
+        }
+        AudioReader.setVolume(level)
+        _ = read(.audio)
+    }
+
+    func setMuted(_ muted: Bool) {
+        AudioReader.setMuted(muted)
+        _ = read(.audio)
     }
 
     // MARK: - 事件驱动的数据
@@ -331,7 +447,15 @@ final class AppModel {
     }
 
     private func apply(_ info: NetworkInfo) {
+        let powerChanged = info.wifiPowered != network.wifiPowered
         network = info
+        if powerChanged {
+            if !info.wifiPowered {
+                wifiNetworks = []
+                wifiUnnamedCount = 0
+            }
+            updateWiFiScanning()
+        }
         setReading(.network, .network(info))
         setIndicator(.wifi, info.wifiPowered)
         setIndicator(.internet, info.link != .none)
@@ -446,6 +570,188 @@ final class AppModel {
             setReading(.accessory, .accessories(AccessoryReader.read()))
         }
         return true
+    }
+
+    // MARK: - Wi-Fi 控制
+
+    /// 面板开着、Wi-Fi 打开时，每 15 秒扫描一次附近的网络。
+    private func updateWiFiScanning() {
+        let wanted = panelVisible && showWiFiControls && network.wifiPowered
+        if wanted {
+            guard wifiScanTask == nil else { return }
+            wifiScanTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    await self?.scanWiFi()
+                    try? await Task.sleep(for: .seconds(15), tolerance: .seconds(2))
+                }
+            }
+        } else {
+            wifiScanTask?.cancel()
+            wifiScanTask = nil
+        }
+    }
+
+    func scanWiFi() async {
+        guard !wifiScanning else { return }
+        wifiScanning = true
+        defer { wifiScanning = false }
+        do {
+            let scan = try await WiFiControl.scan()
+            wifiNetworks = scan.networks
+            wifiUnnamedCount = scan.unnamed
+        } catch {
+            wifiMessage = "搜索网络失败：\(error.localizedDescription)"
+        }
+    }
+
+    func setWiFiPower(_ on: Bool) {
+        guard !wifiSwitching else { return }
+        wifiSwitching = true
+        wifiMessage = nil
+        Task {
+            do {
+                try await WiFiControl.setPower(on)
+            } catch {
+                wifiMessage = "无法\(on ? "打开" : "关闭") Wi-Fi：\(error.localizedDescription)"
+            }
+            wifiSwitching = false
+            networkMonitor.refresh()
+        }
+    }
+
+    /// 加入网络：已保存的网络直接加入，需要密码的新网络先问密码，企业网络交给系统设置。
+    func join(_ target: WiFiNetwork) {
+        guard joiningSSID == nil, target.ssid != network.ssid else { return }
+        if target.enterprise {
+            openWiFiSettings()
+            return
+        }
+        let password: String?
+        if target.needsPassword && !target.known {
+            guard let entered = askPassword?(target.ssid) else { return }
+            password = entered
+        } else {
+            password = nil
+        }
+        joiningSSID = target.ssid
+        wifiMessage = nil
+        Task {
+            do {
+                do {
+                    try await WiFiControl.join(ssid: target.ssid, password: password)
+                } catch where password == nil && target.needsPassword {
+                    // 系统里没有可用的密码，问一次再试。
+                    guard let entered = askPassword?(target.ssid) else { throw CancellationError() }
+                    try await WiFiControl.join(ssid: target.ssid, password: entered)
+                }
+            } catch is CancellationError {
+                // 用户取消了输入密码。
+            } catch {
+                wifiMessage = "无法加入“\(target.ssid)”：\(error.localizedDescription)"
+            }
+            joiningSSID = nil
+            networkMonitor.refresh()
+            await scanWiFi()
+        }
+    }
+
+    func openWiFiSettings() {
+        openSystemSettings(.wifi)
+    }
+
+    // MARK: - 更新
+
+    /// 面板里要提示的新版本（跳过的版本不提示）。
+    var availableUpdate: ReleaseInfo? {
+        switch updateStatus {
+        case let .available(release), let .downloading(release):
+            release.version == skippedVersion ? nil : release
+        case .idle, .checking, .upToDate:
+            nil
+        }
+    }
+
+    /// 启动 30 秒后开始，距上次检查满 24 小时就查一次。
+    private func scheduleUpdateChecks() {
+        updateTask?.cancel()
+        updateTask = nil
+        guard autoCheckUpdates else { return }
+        updateTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            while !Task.isCancelled {
+                guard let self else { return }
+                if Date().timeIntervalSince(lastUpdateCheck ?? .distantPast) >= 24 * 3600 {
+                    await checkForUpdates(manual: false)
+                }
+                try? await Task.sleep(for: .seconds(3600), tolerance: .seconds(300))
+            }
+        }
+    }
+
+    func checkForUpdates(manual: Bool) async {
+        switch updateStatus {
+        case .checking, .downloading: return
+        case .idle, .upToDate, .available: break
+        }
+        let previous = updateStatus
+        updateStatus = .checking
+        updateMessage = nil
+        do {
+            let release = try await UpdateChecker.latestRelease()
+            lastUpdateCheck = Date()
+            Self.defaults.set(lastUpdateCheck, forKey: Keys.lastUpdateCheck)
+            if UpdateChecker.isNewer(release.version, than: UpdateChecker.currentVersion) {
+                if manual, skippedVersion == release.version { setSkippedVersion(nil) }
+                updateStatus = .available(release)
+            } else {
+                updateStatus = .upToDate
+            }
+        } catch {
+            updateStatus = previous
+            // 自动检查失败（比如没联网）不打扰用户，下个小时再试。
+            if manual { updateMessage = "检查更新失败：\(error.localizedDescription)" }
+        }
+    }
+
+    /// 下载安装包并打开，然后退出，方便把新版本拖进“应用程序”替换。
+    func installUpdate() {
+        guard case let .available(release) = updateStatus else { return }
+        guard release.dmgURL != nil else {
+            openReleasePage()
+            return
+        }
+        updateStatus = .downloading(release)
+        updateMessage = nil
+        Task {
+            do {
+                let file = try await UpdateChecker.download(release)
+                NSWorkspace.shared.open(file)
+                try? await Task.sleep(for: .seconds(1.5))
+                NSApp.terminate(nil)
+            } catch {
+                updateStatus = .available(release)
+                updateMessage = "下载失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    func skipUpdate() {
+        guard let release = availableUpdate else { return }
+        setSkippedVersion(release.version)
+    }
+
+    func openReleasePage() {
+        let page = switch updateStatus {
+        case let .available(release), let .downloading(release): release.pageURL
+        case .idle, .checking, .upToDate: UpdateChecker.releasesPage
+        }
+        onClosePanel?()
+        NSWorkspace.shared.open(page)
+    }
+
+    private func setSkippedVersion(_ version: String?) {
+        skippedVersion = version
+        Self.defaults.set(version, forKey: Keys.skippedVersion)
     }
 
     // MARK: - 权限

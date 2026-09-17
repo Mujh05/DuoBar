@@ -41,6 +41,18 @@ struct DuoStyle: Sendable {
     static let reference = DuoStyle(ringWidth: 0.156, dotRadius: 0.109, wifiWeight: 1, wifiScale: 1, dimAlpha: 0.28)
     /// 菜单栏里图标只有十几个点高，线条稍微加粗才看得清。
     static let menuBar = DuoStyle(ringWidth: 0.18, dotRadius: 0.13, wifiWeight: 1.15, wifiScale: 1.06, dimAlpha: 0.3)
+
+    /// 菜单栏图标放大后，线条逐渐回到原始比例，免得大图标显得笨重。
+    static func menuBar(scale: CGFloat) -> DuoStyle {
+        let t = min(max((scale - 1) / 1, 0), 0.5)
+        return DuoStyle(
+            ringWidth: lerp(menuBar.ringWidth, reference.ringWidth, t),
+            dotRadius: lerp(menuBar.dotRadius, reference.dotRadius, t),
+            wifiWeight: lerp(menuBar.wifiWeight, reference.wifiWeight, t),
+            wifiScale: lerp(menuBar.wifiScale, reference.wifiScale, t),
+            dimAlpha: menuBar.dimAlpha
+        )
+    }
 }
 
 enum DuoSpec {

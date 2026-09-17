@@ -22,6 +22,10 @@ if let directory = argument(after: "--debug-snapshot") {
     debugAction = .snapshot(URL(fileURLWithPath: directory.isEmpty ? "snapshots" : directory))
 } else if arguments.contains("--report-position") {
     debugAction = .reportPosition
+} else if arguments.contains("--debug-wifi") {
+    debugAction = .wifiReport
+} else if let directory = argument(after: "--debug-update") {
+    debugAction = .updateReport(URL(fileURLWithPath: directory.isEmpty ? "updates" : directory))
 }
 
 let app = NSApplication.shared
