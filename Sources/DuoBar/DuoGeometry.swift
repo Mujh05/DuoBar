@@ -1,4 +1,5 @@
 import AppKit
+import os
 import SwiftUI
 
 // 坐标系统一为 y 轴向下（翻转的 NSImage 和 SwiftUI Canvas 都是这样），
@@ -439,6 +440,25 @@ enum DuoParts {
 // MARK: - SF Symbols
 
 enum SymbolCache {
+    /// 画图标时统一按这个字号取符号，再缩放到目标大小。系统生成的符号图片会把宽高向上取整到整点，
+    /// 字号小的时候多出来的空白都在图形的右边和上边，按图片框居中，图形就会偏向左下，
+    /// 大小也会随字号跳变（拖动图标大小滑块时很明显）。字号大时这点误差可以忽略。
+    private static let drawingPointSize: CGFloat = 100
+
+    /// 各符号实际有像素的范围，以图片宽高为单位，y 向下。
+    private static let inkCache = OSAllocatedUnfairLock<[String: CGRect]>(initialState: [:])
+
+    /// 把符号放进 rect：大小按整张图片的宽高比适配，位置按实际图形居中。
+    static func placed(_ name: String, in rect: CGRect,
+                       variable: Double? = nil) -> (image: NSImage, frame: CGRect)? {
+        guard let image = image(name, height: drawingPointSize, variable: variable),
+              image.size.width > 0, image.size.height > 0 else { return nil }
+        let scale = min(rect.width / image.size.width, rect.height / image.size.height)
+        let w = image.size.width * scale, h = image.size.height * scale
+        let ink = inkBounds(of: name)
+        return (image, CGRect(x: rect.midX - ink.midX * w, y: rect.midY - ink.midY * h, width: w, height: h))
+    }
+
     static func image(_ name: String, height: CGFloat, variable: Double? = nil) -> NSImage? {
         let config = NSImage.SymbolConfiguration(pointSize: height, weight: .semibold)
         let image = if let variable {
@@ -449,11 +469,44 @@ enum SymbolCache {
         return image?.withSymbolConfiguration(config)
     }
 
-    /// 按符号的宽高比，把它放进 rect 里居中。
-    static func fitted(_ size: CGSize, in rect: CGRect) -> CGRect {
-        guard size.width > 0, size.height > 0 else { return rect }
-        let scale = min(rect.width / size.width, rect.height / size.height)
-        let w = size.width * scale, h = size.height * scale
-        return CGRect(x: rect.midX - w / 2, y: rect.midY - h / 2, width: w, height: h)
+    private static func inkBounds(of name: String) -> CGRect {
+        if let cached = inkCache.withLock({ $0[name] }) { return cached }
+        // 量不出来时按整张图片居中。
+        let measured = measureInk(name) ?? CGRect(x: 0, y: 0, width: 1, height: 1)
+        inkCache.withLock { $0[name] = measured }
+        return measured
+    }
+
+    /// 按每点 2 像素画一遍（可变值全亮），找出不透明像素的范围。
+    private static func measureInk(_ name: String) -> CGRect? {
+        guard let image = image(name, height: drawingPointSize) else { return nil }
+        let pixelsPerPoint: CGFloat = 2
+        let width = Int((image.size.width * pixelsPerPoint).rounded(.up))
+        let height = Int((image.size.height * pixelsPerPoint).rounded(.up))
+        guard width > 0, height > 0,
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let data = context.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
+        context.scaleBy(x: pixelsPerPoint, y: pixelsPerPoint)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        image.draw(in: CGRect(origin: .zero, size: image.size))
+        NSGraphicsContext.restoreGraphicsState()
+
+        // 缓冲区的第一行是图片顶部。
+        var minX = width, maxX = -1, minY = height, maxY = -1
+        for y in 0 ..< height {
+            for x in 0 ..< width where data[(y * width + x) * 4 + 3] > 0 {
+                minX = min(minX, x)
+                maxX = max(maxX, x)
+                minY = min(minY, y)
+                maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX else { return nil }
+        return CGRect(x: CGFloat(minX) / CGFloat(width), y: CGFloat(minY) / CGFloat(height),
+                      width: CGFloat(maxX - minX + 1) / CGFloat(width),
+                      height: CGFloat(maxY - minY + 1) / CGFloat(height))
     }
 }
