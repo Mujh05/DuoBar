@@ -26,6 +26,8 @@ if let directory = argument(after: "--debug-snapshot") {
     debugAction = .wifiReport
 } else if let directory = argument(after: "--debug-update") {
     debugAction = .updateReport(URL(fileURLWithPath: directory.isEmpty ? "updates" : directory))
+} else if arguments.contains("--debug-self-update") {
+    debugAction = .selfUpdate
 }
 
 let app = NSApplication.shared

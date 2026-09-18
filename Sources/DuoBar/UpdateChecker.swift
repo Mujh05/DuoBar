@@ -36,8 +36,14 @@ enum UpdateChecker {
             ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     }
 
+    /// 最新版本的接口。调试时可以用 DUOBAR_UPDATE_API 指向本地的假数据，测试完整的更新过程。
+    private static var latestReleaseAPI: URL {
+        ProcessInfo.processInfo.environment["DUOBAR_UPDATE_API"].flatMap(URL.init(string:))
+            ?? URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
+    }
+
     static func latestRelease() async throws -> ReleaseInfo {
-        var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!)
+        var request = URLRequest(url: latestReleaseAPI)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("DuoBar/\(currentVersion)", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 20
@@ -82,8 +88,13 @@ enum UpdateChecker {
         return false
     }
 
-    /// 下载安装包（默认放到“下载”文件夹）；发布说明里有 SHA-256 时先校验。
-    static func download(_ release: ReleaseInfo, to directory: URL? = nil) async throws -> URL {
+    /// 按数字比较是不是同一个版本，“1.2” 和 “1.2.0” 算同一个。
+    static func isSameVersion(_ a: String, _ b: String) -> Bool {
+        !isNewer(a, than: b) && !isNewer(b, than: a)
+    }
+
+    /// 把安装包下载到 directory；发布说明里有 SHA-256 时先校验。
+    static func download(_ release: ReleaseInfo, to directory: URL) async throws -> URL {
         guard let source = release.dmgURL else { throw UpdateError.noAsset }
         let (temporary, response) = try await URLSession.shared.download(from: source)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -101,10 +112,17 @@ enum UpdateChecker {
             }
         }
 
-        let folder = try directory ?? FileManager.default.url(for: .downloadsDirectory, in: .userDomainMask,
-                                                               appropriateFor: nil, create: true)
-        let destination = uniqueURL(in: folder, name: release.dmgName ?? source.lastPathComponent)
+        let destination = uniqueURL(in: directory, name: release.dmgName ?? source.lastPathComponent)
         try FileManager.default.moveItem(at: temporary, to: destination)
+        return destination
+    }
+
+    /// 把文件挪进“下载”文件夹，自动安装不成功时留给用户手动安装。
+    static func moveToDownloads(_ file: URL) throws -> URL {
+        let folder = try FileManager.default.url(for: .downloadsDirectory, in: .userDomainMask,
+                                                 appropriateFor: nil, create: true)
+        let destination = uniqueURL(in: folder, name: file.lastPathComponent)
+        try FileManager.default.moveItem(at: file, to: destination)
         return destination
     }
 
