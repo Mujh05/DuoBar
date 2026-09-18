@@ -67,10 +67,8 @@ enum UpdateInstaller {
         let fileManager = FileManager.default
         let mountPoint = dmg.deletingLastPathComponent().appendingPathComponent("mount", isDirectory: true)
         try fileManager.createDirectory(at: mountPoint, withIntermediateDirectories: true)
-        // -nobrowse：不在 Finder 和桌面上显示，Spotlight 也不收录。
-        try run("/usr/bin/hdiutil", "attach", dmg.path, "-nobrowse", "-readonly", "-noautoopen",
-                "-mountpoint", mountPoint.path)
-        defer { _ = try? run("/usr/bin/hdiutil", "detach", mountPoint.path, "-force") }
+        try attach(dmg, at: mountPoint)
+        defer { detach(mountPoint) }
 
         let source = try newApp(in: mountPoint, version: version)
         // 和当前 App 在同一块磁盘上，才能直接对调。
@@ -84,6 +82,26 @@ enum UpdateInstaller {
 
         // 对调后旧版本在 staged 的位置，随临时目录一起删掉。
         try swapItems(staged, app)
+    }
+
+    /// 把安装包只读挂载到 mountPoint。nobrowse：不在 Finder 和桌面上显示，Spotlight 也不收录。
+    /// macOS 27 上 hdiutil 已不推荐使用，先用 diskutil image；老系统上的 diskutil 不支持这些参数时改用 hdiutil。
+    private static func attach(_ dmg: URL, at mountPoint: URL) throws {
+        do {
+            try run("/usr/sbin/diskutil", "image", "attach", "--readOnly", "--mountOptions", "nobrowse",
+                    "--mountPoint", mountPoint.path, dmg.path)
+        } catch {
+            // 都不行时报告 diskutil 的错误：以后的系统上可能已经没有 hdiutil 了。
+            guard (try? run("/usr/bin/hdiutil", "attach", dmg.path, "-nobrowse", "-readonly", "-noautoopen",
+                            "-mountpoint", mountPoint.path)) != nil else { throw error }
+        }
+    }
+
+    /// 卸载安装包，里面的文件还开着也强制卸载；diskutil 卸载不了时改用 hdiutil。
+    private static func detach(_ mountPoint: URL) {
+        if (try? run("/usr/sbin/diskutil", "eject", "force", mountPoint.path)) == nil {
+            _ = try? run("/usr/bin/hdiutil", "detach", mountPoint.path, "-force")
+        }
     }
 
     /// 安装包里的 App：必须是 DuoBar，版本号和发布的一致，签名完整。
