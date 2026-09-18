@@ -1,5 +1,6 @@
 #!/bin/zsh
-# 构建 build/DuoBar.app。
+# 构建 build/app.noindex/DuoBar.app。
+# 放在名字以 .noindex 结尾的文件夹里：Spotlight 不收录，开发版就不会出现在启动台里。
 #   scripts/build.sh            只构建
 #   scripts/build.sh --install  构建后装到 ~/Applications 并启动
 set -euo pipefail
@@ -14,7 +15,7 @@ fi
 
 swift build -c release
 BIN="$(swift build -c release --show-bin-path)/DuoBar"
-APP="$ROOT/build/DuoBar.app"
+APP="$ROOT/build/app.noindex/DuoBar.app"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

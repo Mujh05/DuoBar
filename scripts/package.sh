@@ -12,7 +12,7 @@ DMG="$ROOT/build/DuoBar-$VERSION-$(uname -m).dmg"
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 
-cp -R build/DuoBar.app "$STAGE/"
+cp -R build/app.noindex/DuoBar.app "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
 hdiutil create -volname DuoBar -srcfolder "$STAGE" -format UDZO -ov "$DMG" >/dev/null

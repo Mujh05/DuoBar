@@ -318,16 +318,16 @@ struct PanelView: View {
                         .font(.system(size: 11))
                 }
                 Spacer(minLength: 8)
-                if case .downloading = model.updateStatus {
+                if let progress = updateProgress {
                     ProgressView()
                         .controlSize(.small)
-                    Text("正在下载…")
+                    Text(progress)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 } else {
-                    Button("下载并安装") { model.installUpdate() }
+                    Button("立即更新") { model.installUpdate() }
                         .controlSize(.small)
-                        .help("下载安装包并打开，然后退出 DuoBar，把新版本拖进“应用程序”替换即可")
+                        .help("下载并校验新版本，替换当前的 DuoBar 后自动重新打开")
                     Button {
                         model.skipUpdate()
                     } label: {
@@ -343,6 +343,14 @@ struct PanelView: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    private var updateProgress: String? {
+        switch model.updateStatus {
+        case .downloading: "正在下载…"
+        case .installing: "正在安装…"
+        case .idle, .checking, .upToDate, .available: nil
         }
     }
 

@@ -79,6 +79,8 @@ enum UpdateStatus: Equatable, Sendable {
     case upToDate
     case available(ReleaseInfo)
     case downloading(ReleaseInfo)
+    /// 正在替换当前的 DuoBar，完成后会退出并重新打开。
+    case installing(ReleaseInfo)
 }
 
 /// 面板里的一节详情。
@@ -664,7 +666,7 @@ final class AppModel {
     /// 面板里要提示的新版本（跳过的版本不提示）。
     var availableUpdate: ReleaseInfo? {
         switch updateStatus {
-        case let .available(release), let .downloading(release):
+        case let .available(release), let .downloading(release), let .installing(release):
             release.version == skippedVersion ? nil : release
         case .idle, .checking, .upToDate:
             nil
@@ -690,7 +692,7 @@ final class AppModel {
 
     func checkForUpdates(manual: Bool) async {
         switch updateStatus {
-        case .checking, .downloading: return
+        case .checking, .downloading, .installing: return
         case .idle, .upToDate, .available: break
         }
         let previous = updateStatus
@@ -713,26 +715,66 @@ final class AppModel {
         }
     }
 
-    /// 下载安装包并打开，然后退出，方便把新版本拖进“应用程序”替换。
+    /// 下载新版本，校验后直接替换当前的 DuoBar，然后重新打开。
     func installUpdate() {
         guard case let .available(release) = updateStatus else { return }
+        Task { await performUpdate(release) }
+    }
+
+    /// 更新的完整过程。成功时 DuoBar 会退出并重新打开，这个函数不会返回；
+    /// DuoBar 所在的位置不能直接替换时，打开安装包，改为手动拖进“应用程序”。
+    func performUpdate(_ release: ReleaseInfo) async {
         guard release.dmgURL != nil else {
             openReleasePage()
             return
         }
         updateStatus = .downloading(release)
         updateMessage = nil
-        Task {
-            do {
-                let file = try await UpdateChecker.download(release)
-                NSWorkspace.shared.open(file)
-                try? await Task.sleep(for: .seconds(1.5))
-                NSApp.terminate(nil)
-            } catch {
-                updateStatus = .available(release)
-                updateMessage = "下载失败：\(error.localizedDescription)"
-            }
+        let work = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DuoBar-Update-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: work) }
+
+        let dmg: URL
+        do {
+            try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+            dmg = try await UpdateChecker.download(release, to: work)
+        } catch {
+            updateStatus = .available(release)
+            updateMessage = "下载失败：\(error.localizedDescription)"
+            return
         }
+
+        let app: URL
+        do {
+            app = try UpdateInstaller.replaceableApp()
+            updateStatus = .installing(release)
+            try await UpdateInstaller.install(dmg, version: release.version, replacing: app)
+        } catch {
+            updateStatus = .available(release)
+            installManually(dmg, because: error)
+            return
+        }
+
+        // 退出前自己清理，defer 等不到进程退出的时候。
+        try? FileManager.default.removeItem(at: work)
+        do {
+            try UpdateInstaller.relaunch(app)
+        } catch {
+            updateStatus = .idle
+            updateMessage = "已经装好 \(release.version)，退出后重新打开 DuoBar 就是新版本"
+        }
+    }
+
+    /// 自动安装的退路：把安装包挪进“下载”文件夹并打开，由用户拖进“应用程序”。
+    private func installManually(_ dmg: URL, because error: Error) {
+        // 挪不出来就不打开：临时目录马上会被删掉。
+        guard let file = try? UpdateChecker.moveToDownloads(dmg) else {
+            updateMessage = "没能自动更新：\(error.localizedDescription)"
+            return
+        }
+        updateMessage = "没能自动更新：\(error.localizedDescription)。已经打开新版本的安装包，"
+            + "请先退出 DuoBar，再把它拖进“应用程序”替换，以后就能自动更新了。"
+        NSWorkspace.shared.open(file)
     }
 
     func skipUpdate() {
@@ -742,7 +784,7 @@ final class AppModel {
 
     func openReleasePage() {
         let page = switch updateStatus {
-        case let .available(release), let .downloading(release): release.pageURL
+        case let .available(release), let .downloading(release), let .installing(release): release.pageURL
         case .idle, .checking, .upToDate: UpdateChecker.releasesPage
         }
         onClosePanel?()

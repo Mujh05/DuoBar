@@ -18,9 +18,15 @@
 
 ## 更新
 
-从 1.1 开始，DuoBar 每天向 GitHub 查询一次有没有新版本，只请求公开的发布信息，不发送任何个人数据，也可以在设置的“更新”里关掉或手动检查。发现新版本时面板里会出现提示：点“下载并安装”，DuoBar 会把 DMG 下载到“下载”文件夹，按发布说明里的 SHA-256 校验后打开，然后退出自己，把新版本拖进“应用程序”替换即可。
+DuoBar 每天向 GitHub 查询一次有没有新版本，只请求公开的发布信息，不发送任何个人数据，也可以在设置的“更新”里关掉或手动检查。发现新版本时面板里会出现提示，点“立即更新”即可：
 
-1.0 还没有这个功能，需要手动下载一次新版本。
+1. 把安装包下载到临时文件夹，按发布说明里的 SHA-256 校验。
+2. 在后台挂载安装包（不在 Finder 和启动台里出现），核对里面的 App 是 DuoBar、版本号一致、签名完整。
+3. 把新版本复制到 DuoBar 所在的磁盘上，和旧版本原地对调，然后自动重新打开。安装包和旧版本都会删掉。
+
+如果 DuoBar 放在不能直接替换的位置（比如直接在“下载”文件夹或安装包里运行，或者没有权限），会改为打开安装包：先退出 DuoBar，再把新版本拖进“应用程序”，以后就能自动更新了。
+
+自动替换从 1.2 开始才有：1.1 和 1.1.1 更新到 1.2 时还是旧的流程，需要手动拖一次；1.0 没有更新提醒，需要手动下载。
 
 ## 三个位置
 
@@ -119,10 +125,12 @@ macOS 不允许其他 App 移除系统的 Wi-Fi 和电池图标。在 DuoBar 设
 需要 macOS 14 或更高版本和 Xcode（SwiftUI 的宏插件只随 Xcode 提供，单独的 Command Line Tools 编译不了）。当前开发工具是 Command Line Tools 时，构建脚本会自动改用 `/Applications/Xcode.app` 的工具链。
 
 ```bash
-scripts/build.sh            # 生成 build/DuoBar.app
+scripts/build.sh            # 生成 build/app.noindex/DuoBar.app
 scripts/build.sh --install  # 装到 ~/Applications 并启动
 scripts/package.sh          # 生成 build/DuoBar-<版本>-arm64.dmg 并打印 SHA-256
 ```
+
+App 放在名字以 `.noindex` 结尾的文件夹里，Spotlight 不会收录，开发版就不会出现在启动台里。
 
 发布新版本时，把 `Resources/Info.plist` 里的版本号改好，标签写成 `v<版本>`，并在发布说明里附上一行 ``SHA-256: `<哈希>` ``，应用内更新会用它校验下载的安装包。
 
@@ -133,7 +141,7 @@ scripts/package.sh          # 生成 build/DuoBar-<版本>-arm64.dmg 并打印 S
 - 除了下面两项，所有状态都通过公开接口读取，不需要任何权限。
 - 蓝牙：只有用到“蓝牙”指示灯时才会申请。
 - Wi-Fi 网络名称：macOS 只把它提供给有定位权限的 App。只有在面板里点授权按钮时才会申请，DuoBar 不会读取你的位置。
-- 发布的安装包和本地构建目前都使用 ad-hoc 签名，重新构建后 macOS 可能会要求重新授权。
+- 发布的安装包和本地构建目前都使用 ad-hoc 签名，更新或重新构建后 macOS 可能会要求重新授权。
 
 ## 开发
 
@@ -142,13 +150,18 @@ swift build
 .build/debug/DuoBar --render-previews build/previews   # 把各种布局和状态画成 PNG（docs 里的图就是这样生成的）
 
 # 下面几个调试参数用 open 启动：直接运行可执行文件时，蓝牙、定位等权限会算到终端头上，可能被系统强制结束
-open -n -W --stdout build/out.txt build/DuoBar.app --args --debug-snapshot "$PWD/build/snapshots"
+open -n -W --stdout build/out.txt build/app.noindex/DuoBar.app --args --debug-snapshot "$PWD/build/snapshots"
 # 截下菜单栏按钮、面板动画的几帧和设置窗口，然后退出
-open -n -W --stdout build/out.txt build/DuoBar.app --args --debug-wifi
+open -n -W --stdout build/out.txt build/app.noindex/DuoBar.app --args --debug-wifi
 # 只读检查 Wi-Fi 扫描和网络名称，不改变任何 Wi-Fi 状态
-open -n -W --stdout build/out.txt build/DuoBar.app --args --debug-update "$PWD/build/updates"
-# 查询最新版本，把安装包下载到指定目录并校验 SHA-256
+open -n -W --stdout build/out.txt build/app.noindex/DuoBar.app --args --debug-update "$PWD/build/updates"
+# 查询最新版本，把安装包下载到指定目录并校验 SHA-256，再报告当前位置能不能原地替换
+open -n -W --env DUOBAR_PRETEND_VERSION=1.0 --stdout build/out.txt <副本>/DuoBar.app --args --debug-self-update
+# 和点“立即更新”一样走完整个过程：替换这个副本并重新打开它，所以要用一份副本来试。
+# DUOBAR_PRETEND_VERSION 假装是旧版本；DUOBAR_UPDATE_API 可以指向本地的假发布信息（格式同 GitHub 的 releases/latest 接口）
 ```
+
+用 `open` 启动过的 App 会被系统登记，可能出现在启动台里。调试完可以用 `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u <路径>` 取消登记。
 
 | 文件 | 内容 |
 | --- | --- |
@@ -163,6 +176,7 @@ open -n -W --stdout build/out.txt build/DuoBar.app --args --debug-update "$PWD/b
 | `SplitGlyphView.swift` | 面板顶部的拆分动画 |
 | `WiFiControl.swift` / `WiFiSection.swift` | Wi-Fi 开关、扫描和加入网络，以及面板里对应的界面 |
 | `UpdateChecker.swift` | 通过 GitHub Releases 检查、下载并校验新版本 |
+| `UpdateInstaller.swift` | 挂载安装包、核对新版本，原地替换当前的 DuoBar 并重新打开 |
 | `PanelView.swift` / `StatusController.swift` | 弹出面板、菜单栏按钮 |
 | `SettingsWindow.swift` / `Settings*Page*.swift` / `SettingsComponents.swift` | 设置窗口的分页、各页内容和共用部件 |
 

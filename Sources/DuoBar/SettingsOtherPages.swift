@@ -265,7 +265,7 @@ struct UpdatesSettingsPage: View {
     @ViewBuilder
     private var statusIcon: some View {
         switch model.updateStatus {
-        case .checking, .downloading:
+        case .checking, .downloading, .installing:
             Image(systemName: "arrow.triangle.2.circlepath")
                 .rotationEffect(.degrees(spinning ? 360 : 0))
                 .animation(.linear(duration: 1).repeatForever(autoreverses: false), value: spinning)
@@ -294,6 +294,8 @@ struct UpdatesSettingsPage: View {
             return "发现新版本 \(release.version)"
         case let .downloading(release):
             return "正在下载 \(release.version)…"
+        case let .installing(release):
+            return "正在安装 \(release.version)，完成后会自动重新打开…"
         case .idle:
             guard let last = model.lastUpdateCheck else { return "还没有检查过" }
             return "上次检查：\(last.formatted(.relative(presentation: .named)))"
@@ -305,13 +307,14 @@ struct UpdatesSettingsPage: View {
         switch model.updateStatus {
         case .available:
             VStack(alignment: .trailing, spacing: 6) {
-                Button("下载并安装") { model.installUpdate() }
+                Button("立即更新") { model.installUpdate() }
                     .buttonStyle(.borderedProminent)
+                    .help("下载并校验新版本，替换当前的 DuoBar 后自动重新打开")
                 Button("查看更新内容") { model.openReleasePage() }
                     .buttonStyle(.link)
                     .font(.system(size: 11))
             }
-        case .checking, .downloading:
+        case .checking, .downloading, .installing:
             ProgressView()
                 .controlSize(.small)
         case .idle, .upToDate:

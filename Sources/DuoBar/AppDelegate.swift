@@ -12,6 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case wifiReport
         /// 查询 GitHub 上的最新版本，把安装包下载到指定目录并校验后退出。
         case updateReport(URL)
+        /// 检查更新并直接安装，和点“立即更新”一样：成功时替换自己并重新打开。
+        case selfUpdate
     }
 
     private let model = AppModel()
@@ -42,6 +44,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 print(await WiFiControl.debugSummary())
             case let .updateReport(directory):
                 await Self.reportUpdate(downloadingTo: directory)
+            case .selfUpdate:
+                await model.checkForUpdates(manual: true)
+                if let release = model.availableUpdate {
+                    print("installing \(release.version) over \(Bundle.main.bundlePath)")
+                    fflush(stdout)
+                    await model.performUpdate(release)
+                }
+                // 走到这里说明没有更新，或者没能自动更新。
+                print("status: \(model.updateStatus)")
+                print("message: \(model.updateMessage ?? "none")")
             }
             fflush(stdout)
             NSApp.terminate(nil)
@@ -52,6 +64,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let comparisons = [("1.10", "1.9"), ("1.1", "1.1.0"), ("1.0.1", "1.0"), ("1.0", "1.1")]
         for (a, b) in comparisons {
             print("isNewer(\(a), \(b)) = \(UpdateChecker.isNewer(a, than: b))")
+        }
+        do {
+            print("replaceable: \(try UpdateInstaller.replaceableApp().path)")
+        } catch {
+            print("not replaceable: \(error.localizedDescription)")
         }
         do {
             let release = try await UpdateChecker.latestRelease()
