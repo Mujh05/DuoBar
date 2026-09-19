@@ -1,66 +1,9 @@
 import AppKit
 import SwiftUI
 
-// 设置窗口里共用的小部件。
+// 设置窗口里共用的小部件。页面本身和系统设置一样用分组表单（Form + .grouped），这里只放表单里没有的东西。
 
-/// 圆角卡片，标题右边可以放一个按钮之类的附件。
-struct SettingsCard<Trailing: View, Content: View>: View {
-    let title: String?
-    let subtitle: String?
-    let trailing: Trailing
-    let content: Content
-
-    init(_ title: String? = nil, subtitle: String? = nil,
-         @ViewBuilder trailing: () -> Trailing,
-         @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.subtitle = subtitle
-        self.trailing = trailing()
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if title != nil || subtitle != nil {
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        if let title {
-                            Text(title)
-                                .font(.system(size: 13, weight: .semibold))
-                        }
-                        if let subtitle {
-                            Text(subtitle)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    Spacer(minLength: 12)
-                    trailing
-                }
-            }
-            content
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.07))
-        )
-    }
-}
-
-extension SettingsCard where Trailing == EmptyView {
-    init(_ title: String? = nil, subtitle: String? = nil, @ViewBuilder content: () -> Content) {
-        self.init(title, subtitle: subtitle, trailing: { EmptyView() }, content: content)
-    }
-}
-
-/// 系统设置风格的彩色图标底座。
+/// 彩色圆角方块里的白色图形。侧边栏的页面图标（PageIcon）也用它当底座。
 struct IconBadge<Glyph: View>: View {
     let color: Color
     var size: CGFloat
@@ -75,14 +18,18 @@ struct IconBadge<Glyph: View>: View {
     }
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
         glyph
-            .font(.system(size: size * 0.5, weight: .semibold))
+            .font(.system(size: size * 0.55, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
-            .background(
-                RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
-                    .fill(dimmed ? AnyShapeStyle(Color.secondary.opacity(0.35)) : AnyShapeStyle(color.gradient))
-            )
+            .background {
+                shape.fill(dimmed ? AnyShapeStyle(Color.secondary.opacity(0.35)) : AnyShapeStyle(color))
+                // 顶部略亮、底部略暗的光泽。
+                shape.fill(LinearGradient(colors: [.white.opacity(0.16), .clear, .black.opacity(0.08)],
+                                          startPoint: .top, endPoint: .bottom))
+            }
+            .shadow(color: .black.opacity(0.15), radius: size * 0.03, y: size * 0.02)
     }
 }
 
@@ -100,111 +47,71 @@ struct IndicatorBadge: View {
 
     var body: some View {
         IconBadge(color: kind.tint?.color ?? .gray, size: size, dimmed: !on) {
-            IndicatorIcon(kind: kind, size: size * 0.5)
+            IndicatorIcon(kind: kind, size: size * 0.55)
         }
         .symbolEffect(.bounce, value: on)
         .animation(.easeInOut(duration: 0.25), value: on)
     }
 }
 
-/// 悬停时轻轻浮起。
-struct HoverLift: ViewModifier {
-    @State private var hovering = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func body(content: Content) -> some View {
-        content
-            .scaleEffect(hovering && !reduceMotion ? 1.015 : 1)
-            .shadow(color: .black.opacity(hovering ? 0.12 : 0), radius: hovering ? 8 : 0, y: hovering ? 3 : 0)
-            .animation(.spring(duration: 0.25), value: hovering)
-            .onHover { hovering = $0 }
-    }
-}
-
-extension View {
-    func hoverLift() -> some View {
-        modifier(HoverLift())
-    }
-}
-
-/// 左边标题说明、右边开关的一行。
-struct SettingToggle: View {
+/// 自己排版的一行里的标题，下面是小一号的灰色说明，和表单里带说明的行一样。
+struct RowLabel: View {
     let title: String
     var detail: String?
-    @Binding var isOn: Bool
 
     var body: some View {
-        SettingRow(title: title, detail: detail) {
-            Toggle(title, isOn: $isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-        }
-    }
-}
-
-/// 左边标题说明、右边任意控件的一行。
-struct SettingRow<Control: View>: View {
-    let title: String
-    var detail: String?
-    let control: Control
-
-    init(title: String, detail: String? = nil, @ViewBuilder control: () -> Control) {
-        self.title = title
-        self.detail = detail
-        self.control = control()
-    }
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13))
-                if let detail {
-                    Text(detail)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            if let detail {
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 12)
-            control
         }
     }
 }
 
-/// 小胶囊标签，比如“外圈圆环”“圆点 2”。
-struct Badge: View {
+/// 分组下面的说明，和系统设置一样是靠左的灰色小字，右边可以放一个按钮。
+struct SectionNote<Accessory: View>: View {
     let text: String
+    let accessory: Accessory
+
+    init(_ text: String, @ViewBuilder accessory: () -> Accessory) {
+        self.text = text
+        self.accessory = accessory()
+    }
 
     var body: some View {
-        Text(text)
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(Color.accentColor)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(Color.accentColor.opacity(0.14)))
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            accessory
+        }
+        // 和分组的标题、行里的文字对齐。
+        .padding(.leading, 10)
     }
 }
 
-/// 小圆环，数值变化时平滑过渡。
-struct MiniGauge: View {
-    let level: Double
-    let active: Bool
-    let color: Color
-    var size: CGFloat = 30
+extension SectionNote where Accessory == EmptyView {
+    init(_ text: String) {
+        self.init(text) { EmptyView() }
+    }
+}
+
+/// 一行右边的下拉菜单：按钮上写着现在放在哪里，菜单里选“显示在…”。
+struct PlacementMenu<Items: View>: View {
+    let places: [String]
+    @ViewBuilder let items: () -> Items
 
     var body: some View {
-        ZStack {
-            Circle()
-                .stroke(Color.secondary.opacity(0.18), lineWidth: 3.5)
-            Circle()
-                .trim(from: 0, to: max(0.001, min(level, 1)))
-                .stroke(active ? color : Color.secondary.opacity(0.5),
-                        style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-        }
-        .frame(width: size, height: size)
-        .animation(.spring(duration: 0.6), value: level)
+        Menu(places.isEmpty ? "未使用" : places.joined(separator: "、"), content: items)
+            .fixedSize()
+            // 留出固定的宽度，各行左边的数值才能对齐。
+            .frame(minWidth: 96, alignment: .trailing)
     }
 }
 
@@ -284,8 +191,62 @@ struct DotDiagram: View {
     }
 }
 
+/// 某个圆点显示哪个指示灯，“图标”页和“指示灯”页共用。
+/// 可以把“指示灯”页列表里的指示灯拖进来，圆点之间也可以互相拖动交换。
+struct IndicatorDotRow: View {
+    let model: AppModel
+    let index: Int
+    @Binding var dropTarget: String?
+
+    var body: some View {
+        let current = model.layout.indicators[index]
+        Picker(selection: Binding(
+            get: { current },
+            set: { kind in
+                withAnimation(.snappy) {
+                    if let kind {
+                        model.showIndicator(kind, atDot: index)
+                    } else {
+                        model.setIndicator(nil, atDot: index)
+                    }
+                }
+            }
+        )) {
+            Text("空着").tag(IndicatorKind?.none)
+            Divider()
+            ForEach(IndicatorKind.allCases) { kind in
+                if let symbol = kind.symbol {
+                    Label(kind.title, systemImage: symbol).tag(IndicatorKind?.some(kind))
+                } else {
+                    Text(kind.title).tag(IndicatorKind?.some(kind))
+                }
+            }
+        } label: {
+            HStack(spacing: 10) {
+                DotDiagram(index: index)
+                    .frame(width: 26, height: 16)
+                Text("圆点 \(index + 1)")
+                if let current {
+                    IndicatorBadge(kind: current, on: model.indicatorStates[current] == true, size: 18)
+                }
+            }
+        }
+        .dragRow(id: "dot:\(index)", target: $dropTarget, preview: current?.title ?? "空着") { source in
+            if source.hasPrefix("dot:"), let from = Int(source.dropFirst(4)), from != index {
+                withAnimation(.snappy) { model.swapIndicators(from, index) }
+                return true
+            }
+            if source.hasPrefix("indicator:"), let kind = IndicatorKind(rawValue: String(source.dropFirst(10))) {
+                withAnimation(.snappy) { model.showIndicator(kind, atDot: index) }
+                return true
+            }
+            return false
+        }
+    }
+}
+
 extension MetricKind {
-    /// 设置里卡片用的颜色。
+    /// 设置里图标用的颜色。
     var color: Color {
         switch self {
         case .battery: .green
@@ -301,24 +262,19 @@ extension MetricKind {
     }
 }
 
-extension SlotContent {
-    var color: Color {
-        metric?.color ?? .orange
-    }
-}
-
-// MARK: - 拖动交换
+// MARK: - 拖动
 
 extension View {
-    /// 整行可以拖到另一行上；onDrop 收到被拖动那一行的 id。
+    /// 这一行可以拖动，拖动时带着 "duobar-" + id；别的行拖到这一行上时整行高亮，
+    /// 松手后 onDrop 收到被拖动那一行的 id。
     func dragRow(id: String, target: Binding<String?>, preview: String,
                  onDrop: @escaping (String) -> Bool) -> some View {
         let prefix = "duobar-"
         return contentShape(Rectangle())
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(target.wrappedValue == id ? Color.accentColor.opacity(0.18) : .clear)
-                    .padding(-2)
+                    .padding(-5)
             )
             .draggable(prefix + id) {
                 Text(preview)
