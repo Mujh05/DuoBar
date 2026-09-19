@@ -3,102 +3,83 @@ import SwiftUI
 
 // MARK: - 菜单栏
 
-/// “菜单栏”页：电量百分比样式、图标位置、系统自带图标。
+/// “菜单栏”页：电量百分比、图标位置、系统自带的图标。
 struct MenuBarSettingsPage: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SettingsCard("电量百分比", subtitle: "选择数字显示在哪里。放在圆环顶部时，切换会有让位动画。") {
-                VStack(alignment: .leading, spacing: 10) {
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
-                              spacing: 10) {
-                        ForEach(PercentMode.allCases) { mode in
-                            PercentOption(mode: mode, model: model)
-                        }
-                    }
-                    if model.percentMode == .onRing, model.layout[.ring] == nil {
-                        Label("“圆环顶部”需要先在“图标”页里显示外圈圆环。", systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.orange)
-                    }
+        Section {
+            Picker("显示位置", selection: $model.percentMode.animation(.spring(duration: 0.35))) {
+                ForEach(PercentMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
                 }
             }
-            SettingsCard("图标位置", subtitle: "按住 ⌘，把菜单栏里的 DuoBar 图标拖到想要的位置（比如控制中心左边），macOS 会记住。") {
-                DragHint(state: model.iconState)
-                    .frame(maxWidth: .infinity)
-            }
-            SettingsCard("系统自带的图标",
-                         subtitle: "macOS 不允许其他 App 移除系统图标。想只留下 DuoBar，需要在“系统设置 › 菜单栏”里关掉 Wi-Fi 和电池。") {
-                Button {
-                    model.openMenuBarSettings()
-                } label: {
-                    Label("打开菜单栏设置…", systemImage: "arrow.up.right.square")
+            PercentPreview(model: model)
+            if model.percentMode == .onRing, model.layout[.ring] == nil {
+                Label {
+                    Text("“圆环顶部”需要先在“图标”页里显示外圈圆环。")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
                 }
+            }
+        } header: {
+            Text("电量百分比")
+        } footer: {
+            SectionNote(model.percentMode.detail)
+        }
+
+        Section {
+            DragHint(state: model.iconState)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+        } header: {
+            Text("图标位置")
+        } footer: {
+            SectionNote("按住 ⌘，把菜单栏里的 DuoBar 图标拖到想要的位置（比如控制中心左边），macOS 会记住。")
+        }
+
+        Section {
+            LabeledContent {
+                Button("打开菜单栏设置…") { model.openMenuBarSettings() }
+            } label: {
+                Text("系统自带的 Wi-Fi 和电池图标")
+                Text("macOS 不允许其他 App 移除系统图标。想只留下 DuoBar，需要在“系统设置 › 菜单栏”里把它们关掉。")
             }
         }
     }
 }
 
-/// 电量百分比的一个选项，带小预览。
-private struct PercentOption: View {
-    let mode: PercentMode
+private extension PercentMode {
+    var detail: String {
+        switch self {
+        case .never: "菜单栏里只显示图标。"
+        case .whenLow: "电量不高于 20% 时，在图标左边显示百分比。"
+        case .always: "一直在图标左边显示百分比。"
+        case .onRing: "百分比嵌在外圈圆环顶部的开口里，切换时圆环会让出位置。"
+        }
+    }
+}
+
+/// 选中的样式在浅色和深色菜单栏里的样子。电量低时才显示的样式也照样画出数字，方便对比。
+private struct PercentPreview: View {
     let model: AppModel
 
-    private var selected: Bool { model.percentMode == mode }
-
     var body: some View {
+        let mode = model.percentMode
         let percent = model.battery.hasBattery ? model.battery.percent : 56
-        Button {
-            withAnimation(.spring(duration: 0.35)) { model.percentMode = mode }
-        } label: {
-            VStack(spacing: 8) {
-                MenuBarMock(state: model.iconState,
+        HStack(spacing: 10) {
+            ForEach([false, true], id: \.self) { dark in
+                MenuBarMock(state: model.iconState, scale: CGFloat(model.iconScale),
                             percentTitle: mode == .always || mode == .whenLow ? "\(percent)%" : nil,
                             embeddedPercent: mode == .onRing ? percent : nil,
                             embeddedProgress: mode == .onRing ? 1 : 0,
-                            dark: true)
-                    .opacity(mode == .whenLow ? 0.85 : 1)
-                VStack(spacing: 1) {
-                    Text(mode.title)
-                        .font(.system(size: 12, weight: selected ? .semibold : .regular))
-                    Text(detail)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
+                            dark: dark)
             }
-            .padding(10)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(selected ? Color.accentColor.opacity(0.13) : Color.primary.opacity(0.035))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 2)
-            )
-            .overlay(alignment: .topTrailing) {
-                if selected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(.white, Color.accentColor)
-                        .padding(6)
-                        .transition(.scale.combined(with: .opacity))
-                }
-            }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .hoverLift()
-    }
-
-    private var detail: String {
-        switch mode {
-        case .never: "只显示图标"
-        case .whenLow: "电量不高于 20% 时才显示"
-        case .always: "一直显示在图标左边"
-        case .onRing: "嵌在圆环顶部的开口里"
-        }
+        .fixedSize()
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
     }
 }
 
@@ -220,44 +201,50 @@ struct UpdatesSettingsPage: View {
     @State private var spinning = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SettingsCard {
-                HStack(spacing: 16) {
-                    Image(nsImage: NSApp.applicationIconImage)
-                        .resizable()
-                        .frame(width: 64, height: 64)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("DuoBar \(UpdateChecker.currentVersion)")
-                            .font(.system(size: 17, weight: .semibold))
-                        HStack(spacing: 6) {
-                            statusIcon
-                            Text(statusText)
-                                .contentTransition(.opacity)
-                        }
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        if let message = model.updateMessage {
-                            Text(message)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.red)
-                                .transition(.opacity)
-                        }
+        Section {
+            HStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 48, height: 48)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("DuoBar \(UpdateChecker.currentVersion)")
+                        .font(.headline)
+                    HStack(spacing: 5) {
+                        statusIcon
+                        Text(statusText)
+                            .contentTransition(.opacity)
                     }
-                    Spacer(minLength: 12)
-                    actions
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    if let message = model.updateMessage {
+                        Text(message)
+                            .font(.subheadline)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .transition(.opacity)
+                    }
                 }
-                .animation(.snappy, value: model.updateStatus)
-                .animation(.snappy, value: model.updateMessage)
+                Spacer(minLength: 12)
+                actions
             }
-            SettingsCard("自动检查") {
-                SettingToggle(title: "每天检查一次更新",
-                              detail: "向 GitHub 查询最新版本，不会发送任何个人信息。发现新版本时，面板里会出现提示。",
-                              isOn: $model.autoCheckUpdates)
+            .padding(.vertical, 4)
+            .animation(.snappy, value: model.updateStatus)
+            .animation(.snappy, value: model.updateMessage)
+        }
+
+        Section {
+            Toggle(isOn: $model.autoCheckUpdates) {
+                Text("每天检查一次更新")
+                Text("向 GitHub 查询最新版本，不会发送任何个人信息。发现新版本时，面板里会出现提示。")
             }
-            SettingsCard("所有版本", subtitle: "每个版本的更新内容和安装包都在 GitHub 的发布页面上。") {
-                Link(destination: UpdateChecker.releasesPage) {
-                    Label("在 GitHub 上查看", systemImage: "arrow.up.right.square")
-                }
+        }
+
+        Section {
+            LabeledContent {
+                Link("在 GitHub 上查看", destination: UpdateChecker.releasesPage)
+            } label: {
+                Text("所有版本")
+                Text("每个版本的更新内容和安装包都在 GitHub 的发布页面上。")
             }
         }
     }
@@ -312,7 +299,7 @@ struct UpdatesSettingsPage: View {
                     .help("下载并校验新版本，替换当前的 DuoBar 后自动重新打开")
                 Button("查看更新内容") { model.openReleasePage() }
                     .buttonStyle(.link)
-                    .font(.system(size: 11))
+                    .font(.subheadline)
             }
         case .checking, .downloading, .installing:
             ProgressView()
@@ -335,55 +322,50 @@ struct GeneralSettingsPage: View {
     private static let issues = URL(string: "https://github.com/\(UpdateChecker.repository)/issues")!
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SettingsCard("面板") {
-                SettingToggle(title: "显示 Wi-Fi 开关和附近的网络",
-                              detail: "网络放在图标上时，点面板里的网络图标展开；否则从面板底部的 Wi-Fi 按钮打开。",
-                              isOn: $model.showWiFiControls)
+        Section("面板") {
+            Toggle(isOn: $model.showWiFiControls) {
+                Text("显示 Wi-Fi 开关和附近的网络")
+                Text("网络放在图标上时，点面板里的网络图标展开；否则从面板底部的 Wi-Fi 按钮打开。")
             }
-            SettingsCard("启动") {
-                VStack(alignment: .leading, spacing: 8) {
-                    SettingToggle(title: "登录时自动启动", isOn: Binding(
-                        get: { model.launchAtLogin },
-                        set: { model.setLaunchAtLogin($0) }
-                    ))
-                    if let note = model.loginItemNote {
-                        Button(note) { model.openLoginItemsSettings() }
-                            .buttonStyle(.link)
-                            .font(.system(size: 11))
-                    }
-                }
+        }
+
+        Section("启动") {
+            Toggle("登录时自动启动", isOn: Binding(
+                get: { model.launchAtLogin },
+                set: { model.setLaunchAtLogin($0) }
+            ))
+            if let note = model.loginItemNote {
+                Button(note) { model.openLoginItemsSettings() }
+                    .buttonStyle(.link)
             }
-            SettingsCard("关于") {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 14) {
-                        Image(nsImage: NSApp.applicationIconImage)
-                            .resizable()
-                            .frame(width: 52, height: 52)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("DuoBar")
-                                .font(.system(size: 15, weight: .semibold))
-                            Text("版本 \(UpdateChecker.currentVersion)")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                            Text("把 iPhone Duo 外屏的三合一状态图标搬到 Mac 菜单栏。")
-                                .font(.system(size: 12))
-                        }
-                    }
-                    HStack(spacing: 16) {
-                        Link(destination: Self.homepage) {
-                            Label("GitHub 主页", systemImage: "chevron.left.forwardslash.chevron.right")
-                        }
-                        Link(destination: Self.issues) {
-                            Label("反馈问题", systemImage: "exclamationmark.bubble.fill")
-                        }
-                    }
-                    .font(.system(size: 12))
-                    Text("DuoBar 是独立的非官方项目，与 Apple Inc. 没有关联。")
-                        .font(.system(size: 11))
+        }
+
+        Section {
+            HStack(spacing: 12) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 48, height: 48)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("DuoBar")
+                        .font(.headline)
+                    Text("版本 \(UpdateChecker.currentVersion)")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
+                    Text("把 iPhone Duo 外屏的三合一状态图标搬到 Mac 菜单栏。")
+                        .font(.subheadline)
                 }
             }
+            .padding(.vertical, 4)
+            LabeledContent("项目主页") {
+                Link("在 GitHub 上查看", destination: Self.homepage)
+            }
+            LabeledContent("反馈问题") {
+                Link("提交到 GitHub", destination: Self.issues)
+            }
+        } header: {
+            Text("关于")
+        } footer: {
+            SectionNote("DuoBar 是独立的非官方项目，与 Apple Inc. 没有关联。")
         }
     }
 }

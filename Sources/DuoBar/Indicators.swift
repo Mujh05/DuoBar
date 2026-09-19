@@ -73,6 +73,16 @@ enum IndicatorKind: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// 设置里按这个分组列出，和 README 的分类一致。
+    var group: String {
+        switch self {
+        case .bluetooth, .wifi, .internet, .vpn, .hotspot, .ethernet: "网络"
+        case .headphones, .microphone, .muted: "声音"
+        case .charging, .pluggedIn, .lowPower, .lowBattery: "电源"
+        case .externalDisplay, .capsLock, .memoryPressure, .diskLow: "其他"
+        }
+    }
+
     /// nil 表示用自己画的图形（蓝牙标志）。
     var symbol: String? {
         switch self {

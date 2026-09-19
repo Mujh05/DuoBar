@@ -18,28 +18,7 @@ enum SettingsPage: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var subtitle: String {
-        switch self {
-        case .icon: "三个位置显示什么、图标多大、要不要变色"
-        case .metrics: "可以放在图标上的 9 种状态和它们的实时数值"
-        case .indicators: "底部 4 个圆点各自显示的开关状态"
-        case .menuBar: "电量百分比、图标位置和系统自带的图标"
-        case .updates: "检查 GitHub 上有没有新版本"
-        case .general: "面板、启动和关于 DuoBar"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .icon: "paintbrush.pointed.fill"
-        case .metrics: "gauge.with.dots.needle.67percent"
-        case .indicators: "circle.grid.2x2.fill"
-        case .menuBar: "menubar.rectangle"
-        case .updates: "arrow.down.circle.fill"
-        case .general: "gearshape.fill"
-        }
-    }
-
+    /// 侧边栏图标的底色；图形见 PageGlyph。
     var color: Color {
         switch self {
         case .icon: .blue
@@ -52,11 +31,10 @@ enum SettingsPage: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// 设置窗口：左侧分页，右侧内容，切换时淡入并轻轻上移。
+/// 设置窗口，和系统设置一样：左侧分页，右侧是分组表单，窗口标题显示当前页的名字。
 struct SettingsRoot: View {
     @Bindable var model: AppModel
     @State private var selection: SettingsPage?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(model: AppModel, page: SettingsPage = .icon) {
         self.model = model
@@ -71,43 +49,22 @@ struct SettingsRoot: View {
                 Label {
                     Text(page.title)
                 } icon: {
-                    IconBadge(symbol: page.symbol, color: page.color, size: 20)
+                    PageIcon(page: page)
                 }
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 220)
         } detail: {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    header
-                    content
-                }
-                .padding(.horizontal, 28)
-                .padding(.vertical, 24)
-                .frame(maxWidth: 660, alignment: .leading)
-                .frame(maxWidth: .infinity)
-                .id(page)
-                .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 14)))
+            Form {
+                content
             }
-            .background(Color(nsColor: .windowBackgroundColor))
-            .animation(reduceMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.35), value: page)
+            .formStyle(.grouped)
+            .toggleStyle(.switch)
+            // 换页时从顶部开始，不沿用上一页的滚动位置。
+            .id(page)
         }
         .toolbar(removing: .sidebarToggle)
-        .navigationTitle("DuoBar 设置")
-    }
-
-    private var header: some View {
-        HStack(spacing: 12) {
-            IconBadge(symbol: page.symbol, color: page.color, size: 38)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(page.title)
-                    .font(.system(size: 21, weight: .bold))
-                Text(page.subtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.bottom, 2)
+        .navigationTitle(page.title)
     }
 
     @ViewBuilder

@@ -78,19 +78,15 @@ enum DuoSpec {
     static let textWidth: CGFloat = 1.2
     static let textHeight: CGFloat = 0.64
 
+    /// 圆环顶部嵌入的电量数字，量自 iPhone Duo 打开“电量百分比”后的样子：
+    /// 数字高约 0.46R，中心在圆心上方 0.85R，圆环两端的圆头和数字之间空出约 0.2R。
+    static let percentHeight: CGFloat = 0.46
+    static let percentCenterY: CGFloat = -0.85
+    static let percentClearance: CGFloat = 0.2
+
     static var bottomGapFraction: CGFloat { bottomGapDegrees / 360 }
     static var compactGapFraction: CGFloat { compactGapDegrees / 360 }
     static var topGapFraction: CGFloat { topGapDegrees / 360 }
-
-    /// 圆环顶部嵌入电量数字时，为不同位数留出的开口半角。
-    static func percentTopGapFraction(_ percent: Int) -> CGFloat {
-        let degrees: CGFloat = switch String(percent).count {
-        case 1: 25
-        case 2: 32
-        default: 40
-        }
-        return degrees / 360
-    }
 }
 
 func radians(_ degrees: CGFloat) -> CGFloat { degrees * .pi / 180 }
@@ -377,30 +373,48 @@ enum DuoParts {
         return [.symbol(name, rect: CGRect(x: mid.x - height, y: mid.y - height / 2, width: height * 2, height: height))]
     }
 
-    /// 参考 iPhone Duo 的样式，把电量数字嵌入圆环顶部。
-    static func topPercent(_ percent: Int, progress rawProgress: CGFloat,
-                           center: CGPoint, radius R: CGFloat) -> [DuoMark] {
-        let progress = min(max(rawProgress, 0), 1)
-        let alpha = smoothstep(0.12, 0.82, progress)
-        guard alpha > 0 else { return [] }
-        let text = String(percent)
-        let scale = lerp(0.82, 1, progress)
-        let width = (0.4 * CGFloat(text.count) + 0.2) * R * scale
-        let height = 0.62 * R * scale
-        let y = center.y + lerp(-0.70, -0.92, progress) * R
-        let box = CGRect(x: center.x - width / 2, y: y - height / 2, width: width, height: height)
-        return [.layer(alpha: alpha, [.fill(TextPath.path(text, in: box))])]
+    /// 参考 iPhone Duo 的样式嵌在圆环顶部的电量数字。数字按固定字高排版，
+    /// 圆环按数字的实际宽度让出开口，两端的圆头不会碰到数字。
+    struct TopPercent {
+        let text: String
+        /// 圆环半径为 1 时数字的宽度。
+        let width: CGFloat
+
+        init(_ percent: Int) {
+            text = String(percent)
+            width = TextPath.width(text, height: DuoSpec.percentHeight, face: .plain)
+        }
+
+        /// 圆环顶部开口的半角，按整圈的比例。lineWidth 以圆环半径为单位。
+        func gapFraction(lineWidth: CGFloat) -> CGFloat {
+            let reach = width / 2 + lineWidth / 2 + DuoSpec.percentClearance
+            return asin(min(reach, 1)) / (2 * .pi)
+        }
+
+        /// progress 从 0 到 1：数字从圆环里面升到顶部，同时由小变大、淡入。
+        func marks(progress rawProgress: CGFloat, center: CGPoint, radius R: CGFloat) -> [DuoMark] {
+            let progress = min(max(rawProgress, 0), 1)
+            let alpha = smoothstep(0.12, 0.82, progress)
+            guard alpha > 0 else { return [] }
+            let height = DuoSpec.percentHeight * R * lerp(0.82, 1, progress)
+            let y = center.y + lerp(DuoSpec.percentCenterY + 0.22, DuoSpec.percentCenterY, progress) * R
+            let path = TextPath.path(text, height: height, centeredAt: CGPoint(x: center.x, y: y), face: .plain)
+            return [.layer(alpha: alpha, [.fill(path)])]
+        }
     }
 
     /// 完整的三合一图标。
     static func combined(_ state: IconState, center: CGPoint, radius R: CGFloat, style: DuoStyle,
                          embeddedPercent: Int? = nil, embeddedPercentProgress rawProgress: CGFloat = 0) -> [DuoMark] {
         let progress = embeddedPercent == nil ? 0 : min(max(rawProgress, 0), 1)
+        let percent = embeddedPercent.map(TopPercent.init)
         var marks: [DuoMark] = []
         if let ring = state.ring {
             let powerGap = ring.power != nil && ring.power != .battery ? DuoSpec.topGapFraction : 0
-            let percentGap = embeddedPercent.map(DuoSpec.percentTopGapFraction) ?? powerGap
-            let topGap = lerp(powerGap, percentGap, progress)
+            let percentGap = percent?.gapFraction(lineWidth: style.ringWidth) ?? powerGap
+            // 开口先快后慢，比数字先让出位置，数字升上来的过程中也碰不到圆环。
+            let opening = 1 - (1 - progress) * (1 - progress)
+            let topGap = lerp(powerGap, percentGap, opening)
             marks += DuoParts.ring(loop: circle(center, R), lineWidth: style.ringWidth * R, level: ring.level,
                                    bottomGap: bottomGap(hasDots: state.dots != nil), topGap: topGap,
                                    trackAlpha: style.dimAlpha,
@@ -417,8 +431,8 @@ enum DuoParts {
         if let part = state.dots {
             marks += dots(center: center, radius: R, style: style, lights: part.lights)
         }
-        if let embeddedPercent, state.ring != nil {
-            marks += topPercent(embeddedPercent, progress: progress, center: center, radius: R)
+        if let percent, state.ring != nil {
+            marks += percent.marks(progress: progress, center: center, radius: R)
         }
         return marks
     }
