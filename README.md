@@ -8,7 +8,7 @@
 
 ## 下载安装
 
-从 [GitHub Releases](https://github.com/Mujh05/DuoBar/releases/latest) 下载 `DuoBar-1.3-arm64.dmg`。需要 macOS 14 或更高版本，仅支持 Apple Silicon（M1 及后续芯片）。
+从 [GitHub Releases](https://github.com/Mujh05/DuoBar/releases/latest) 下载 `DuoBar-1.4-arm64.dmg`。需要 macOS 14 或更高版本，仅支持 Apple Silicon（M1 及后续芯片）。
 
 1. 打开 DMG，把 DuoBar 拖进“应用程序”。
 2. 第一次启动时，在“应用程序”里右键 DuoBar，选“打开”，再确认打开。
@@ -71,24 +71,37 @@ Wi-Fi 信号：≥ −55 dBm 4 格，≥ −65 dBm 3 格，≥ −75 dBm 2 格�
 
 ## 面板
 
-点菜单栏图标会弹出面板，三合一图标会像 iPhone Duo 打开控制中心那样拆开：圆点变成信号格或一排指示灯图标，中间内容居中，外圈变成电池（放的不是电量时变成带图标的小圆环）。
+点菜单栏图标会弹出面板。它和 macOS 26 的控制中心、菜单栏菜单一个样子：没有箭头，贴着菜单栏出现在图标下面，背景是系统的玻璃材质（macOS 14、15 上是毛玻璃）；打开时不会抢走前台 App 的焦点。
 
-![拆分动画逐帧](docs/split.png)
+打开时，几个胶囊从同一个位置滑开，三合一图标跟着拆开，外圈、中间和底部圆点各自落进一个胶囊的圆形图标里：电量的圆环变成电池，其他外圈状态变成小圆环，指示灯圆点排成 2×2，档位圆点变成信号格。macOS 26 起胶囊是系统的玻璃，滑开时像一滴水分成几滴，也跟着系统的玻璃样式（透明、着色）和深浅色变化。系统开启“减弱动态效果”时直接显示拆开后的样子。
 
-面板平时只显示这三个图标，点其中一个，下面才展开它的详情和相应的设置，再点一次收起。点面板外面任意位置会关闭面板，下次打开时详情会收起。
+![胶囊拆分逐帧](docs/tile-split.png)
 
-| 点的图标 | 展开的内容 |
+面板平时是几个控制中心样式的胶囊，分别对应图标的外圈、中间和底部圆点，写着各自现在的状态。点一个胶囊，其他的会收起，下面展开和系统菜单一样的详情，再点一次收起；点胶囊左边的圆形图标可以直接开关 Wi-Fi 或静音。点面板外面、按 Esc 或切到别的 App 时面板会收起，下次打开时回到只有胶囊的样子。
+
+| 点的胶囊 | 展开的内容 |
 | --- | --- |
-| 网络 | Wi-Fi 开关、信号摘要、附近的网络 |
-| 电量 | 电量、状态、剩余时间，“电池设置…” |
-| 音量 | 音量滑块、静音按钮、输出设备，“声音设置…” |
+| Wi-Fi | 和系统的 Wi-Fi 菜单一样：开关、已知网络、其他网络，“Wi-Fi 设置…” |
+| 电池 | 和系统的电池菜单一样：电源、充电状态、“立即充满电”、能耗模式、使用大量能耗的 App，“电池设置…” |
+| 声音 | 音量滑块、输出设备，“声音设置…” |
 | 指示灯 | 每个指示灯的状态；Wi-Fi 和静音可以直接开关 |
-| CPU、GPU、内存、网速 | 详细数值，“打开活动监视器” |
+| CPU、GPU、内存、网速 | 详细数值，“活动监视器…” |
 | 磁盘、蓝牙外设 | 详细数值，“存储空间…” / “蓝牙设置…” |
 
-网络放在图标上时点网络图标，没放时点面板底部的 Wi-Fi 按钮，就能开关 Wi-Fi、查看附近的网络并切换。关掉系统自带的 Wi-Fi 图标后，日常使用也不受影响：
+### 电池
 
-- 当前网络打勾显示；系统里保存过的网络列在“已知网络”，其他网络收在“其他网络”里，面板开着时每 15 秒刷新一次
+关掉系统自带的电池图标后，系统电池菜单里的内容在 DuoBar 里也有：
+
+- 充电状态的说法和系统一致：暂停充电、正在充电至 80% 上限、已充电至 80% 上限、电量达到 80% 时将停止充电、完全充满电还需多久、慢充、建议维修
+- 优化电池充电暂停了充电，或者设了充电上限时，可以点“立即充满电”。DuoBar 调用的是控制中心同款的系统接口（私有框架 PowerUI），不需要额外的权限
+- 能耗模式（自动、低电量、高电量）只能显示：macOS 只允许系统自己切换，点它会打开电池设置
+- “使用大量能耗”没有公开接口，DuoBar 按最近的 CPU 占用来估，Safari 网页这类辅助进程算在所属的 App 头上；只在电池详情展开时统计
+
+### Wi-Fi
+
+网络放在图标上时点 Wi-Fi，没放时面板里会单独多一个 Wi-Fi，展开后和系统的 Wi-Fi 菜单一样，可以开关 Wi-Fi、查看附近的网络并切换。关掉系统自带的 Wi-Fi 图标后，日常使用也不受影响：
+
+- 当前网络用白底蓝色的图标显示；系统里保存过的网络列在“已知网络”，其他网络收在“其他网络”里，面板开着时每 15 秒刷新一次
 - 点已知网络直接切换；新的加密网络会弹出系统对话框输入密码，密码直接交给系统，DuoBar 不保存
 - 需要账号登录的企业网络（802.1X）请在“Wi-Fi 设置…”里加入
 - macOS 只把网络名称提供给有定位权限的 App；读不到名称时，面板里会出现授权按钮
@@ -96,7 +109,7 @@ Wi-Fi 信号：≥ −55 dBm 4 格，≥ −65 dBm 3 格，≥ −75 dBm 2 格�
 
 ## 设置
 
-面板里的“自定义图标…”会打开设置窗口。它按 macOS 系统设置的样子排版：左边 6 页，右边是分组列表，窗口标题显示当前页的名字；左边的图标用 DuoBar 自己的圆环和圆点画成。
+面板里的“DuoBar 设置…”会打开设置窗口。它按 macOS 系统设置的样子排版：左边 6 页，右边是分组列表，窗口标题显示当前页的名字；左边的图标用 DuoBar 自己的圆环和圆点画成。
 
 ![设置窗口](docs/settings.png)
 
@@ -108,6 +121,10 @@ Wi-Fi 信号：≥ −55 dBm 4 格，≥ −65 dBm 3 格，≥ −75 dBm 2 格�
 | 菜单栏 | 电量百分比的显示位置（带预览）、⌘ 拖动调整位置的演示、打开“系统设置 › 菜单栏” |
 | 更新 | 当前版本、手动检查、每天自动检查 |
 | 通用 | 面板里的 Wi-Fi 控制、登录时自动启动、关于 |
+
+“图标”页的预览点一下会播放拆分动画：圆点变成信号格或一排指示灯，中间内容居中，外圈变成电池。
+
+![拆分动画逐帧](docs/split.png)
 
 只有正在显示的内容才会采样；打开设置窗口时会采样全部内容，方便对照（蓝牙除外，没授权时不会因此弹出权限框）。系统开启“减弱动态效果”时，循环播放的演示动画会停下。
 
@@ -156,7 +173,10 @@ swift build
 
 # 下面几个调试参数用 open 启动：直接运行可执行文件时，蓝牙、定位等权限会算到终端头上，可能被系统强制结束
 open -n -W --stdout build/out.txt build/app.noindex/DuoBar.app --args --debug-snapshot "$PWD/build/snapshots"
-# 截下菜单栏按钮、面板动画的几帧和设置窗口，然后退出
+# 截下菜单栏按钮、面板和设置窗口，然后退出（离屏渲染画不出玻璃材质）
+open -n -W --stdout build/out.txt build/app.noindex/DuoBar.app --args --debug-panel ring
+# 打开面板并展开一项（ring、center、dots、wifi，或者 none）停留 5 秒，打印面板位置，可以用 screencapture -R 截下真实的玻璃效果。
+# DUOBAR_DEBUG_APPEARANCE=dark|light 指定深浅色，DUOBAR_DEBUG_WAIT 指定打印位置前等几秒，DUOBAR_DEBUG_SPLIT=0…1 固定拆分进度
 open -n -W --stdout build/out.txt build/app.noindex/DuoBar.app --args --debug-wifi
 # 只读检查 Wi-Fi 扫描和网络名称，不改变任何 Wi-Fi 状态
 open -n -W --stdout build/out.txt build/app.noindex/DuoBar.app --args --debug-update "$PWD/build/updates"
@@ -178,11 +198,12 @@ open -n -W --env DUOBAR_PRETEND_VERSION=1.0 --stdout build/out.txt <副本>/DuoB
 | `DuoGeometry.swift` | 图标几何：圆环、圆点、Wi-Fi 等部件，圆环顶部的电量数字，以及圆环变形成电池用的圆角矩形闭环 |
 | `MarkRenderers.swift` | 同一套绘制指令分别画到 Core Graphics（菜单栏）和 SwiftUI Canvas（面板、设置） |
 | `TextPath.swift` | 把数字转成轮廓路径 |
-| `SplitGlyphView.swift` | 面板顶部的拆分动画 |
+| `SplitGlyphView.swift` / `TileGlyph.swift` | 设置窗口预览里的拆分动画；面板胶囊里的图案和打开面板时的拆分 |
 | `WiFiControl.swift` / `WiFiSection.swift` | Wi-Fi 开关、扫描和加入网络，以及面板里对应的界面 |
 | `UpdateChecker.swift` | 通过 GitHub Releases 检查、下载并校验新版本 |
 | `UpdateInstaller.swift` | 挂载安装包、核对新版本，原地替换当前的 DuoBar 并重新打开 |
-| `PanelView.swift` / `StatusController.swift` | 弹出面板、菜单栏按钮 |
+| `PanelView.swift` / `MenuComponents.swift` / `MenuPanel.swift` / `StatusController.swift` | 弹出面板（控制中心样式的胶囊、系统菜单样式的详情、贴着菜单栏的玻璃窗口）、菜单栏按钮 |
+| `ChargingControl.swift` / `EnergyUsage.swift` | 优化充电和充电上限的状态、“立即充满电”，以及估算使用大量能耗的 App |
 | `SettingsWindow.swift` / `Settings*Page*.swift` / `SettingsComponents.swift` | 设置窗口的分页、各页内容和共用部件 |
 | `SettingsPageIcon.swift` | 设置侧边栏的页面图标，用 DuoBar 的圆环和圆点画成 |
 

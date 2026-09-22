@@ -82,6 +82,11 @@ enum CGMarkRenderer {
 extension GraphicsContext {
     /// 在 SwiftUI Canvas 里画 DuoMark。
     func draw(_ marks: [DuoMark], color: Color) {
+        draw(marks, color: color, tint: { $0.color })
+    }
+
+    /// tint 决定带颜色的部分用什么颜色，比如白底上要用浅色外观下的固定颜色。
+    func draw(_ marks: [DuoMark], color: Color, tint: (DuoTint) -> Color) {
         for mark in marks {
             switch mark {
             case let .stroke(path, width):
@@ -117,11 +122,11 @@ extension GraphicsContext {
                 var context = self
                 context.opacity *= alpha
                 context.drawLayer { layer in
-                    layer.draw(children, color: color)
+                    layer.draw(children, color: color, tint: tint)
                 }
 
-            case let .tinted(tint, children):
-                draw(children, color: tint.color)
+            case let .tinted(duoTint, children):
+                draw(children, color: tint(duoTint), tint: tint)
             }
         }
     }

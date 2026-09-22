@@ -95,6 +95,14 @@ enum DetailSection: Hashable, Identifiable, Sendable {
 @Observable
 final class AppModel {
     private(set) var battery = BatteryInfo.placeholder
+    /// 优化充电和充电上限的状态；这台 Mac 不支持时为 nil。
+    private(set) var chargeLimit: ChargeLimitState?
+    /// 正在执行“立即充满电”。
+    private(set) var chargingToFullRequested = false
+    /// “立即充满电”失败的原因。
+    private(set) var chargeMessage: String?
+    /// 使用大量能耗的 App；还没统计出来时为 nil。
+    private(set) var energyHogs: [EnergyHog]?
     private(set) var network = NetworkInfo.placeholder
     private(set) var readings: [MetricKind: MetricReading] = [:]
     /// 指示灯状态；没有记录表示未知。
@@ -153,13 +161,21 @@ final class AppModel {
             if panelVisible {
                 batteryMonitor.refresh()
                 networkMonitor.refresh()
+                refreshChargeLimit()
                 bluetoothAccess = BluetoothMonitor.access
                 refreshLoginItem()
             } else {
                 wifiMessage = nil
+                chargeMessage = nil
             }
             updateWiFiScanning()
+            updateEnergySampling()
         }
+    }
+
+    /// 面板里的电池详情是否展开。展开时才统计哪些 App 使用大量能耗。
+    var batteryDetailVisible = false {
+        didSet { updateEnergySampling() }
     }
 
     // MARK: 更新
@@ -210,6 +226,8 @@ final class AppModel {
     /// 打开其他 App 或系统设置后收起面板。
     @ObservationIgnored var onClosePanel: (() -> Void)?
     @ObservationIgnored private var wifiScanTask: Task<Void, Never>?
+    @ObservationIgnored private var chargeLimitTask: Task<Void, Never>?
+    @ObservationIgnored private var energyTask: Task<Void, Never>?
     @ObservationIgnored private var updateTask: Task<Void, Never>?
 
     @ObservationIgnored private let batteryMonitor = BatteryMonitor()
@@ -436,10 +454,95 @@ final class AppModel {
         _ = read(.audio)
     }
 
+    // MARK: - 充电
+
+    /// 优化充电的状态跟着电源变化读一次；是跨进程调用，放到后台。
+    private func refreshChargeLimit() {
+        guard battery.hasBattery else {
+            chargeLimit = nil
+            return
+        }
+        chargeLimitTask?.cancel()
+        chargeLimitTask = Task { [weak self] in
+            let state = await Task.detached { ChargingControl.read() }.value
+            guard !Task.isCancelled else { return }
+            self?.chargeLimit = state
+        }
+    }
+
+    /// 和系统电池菜单里的“立即充满电”一样。
+    func chargeToFullNow() {
+        guard let state = chargeLimit, state.canOverride, !chargingToFullRequested else { return }
+        chargingToFullRequested = true
+        chargeMessage = nil
+        Task { [weak self] in
+            let failure = await Task.detached { () -> String? in
+                do {
+                    try ChargingControl.chargeToFullNow(state)
+                    return nil
+                } catch {
+                    return error.localizedDescription
+                }
+            }.value
+            guard let self else { return }
+            chargingToFullRequested = false
+            if let failure { chargeMessage = "没能立即充满电：\(failure)" }
+            batteryMonitor.refresh()
+            refreshChargeLimit()
+        }
+    }
+
+    /// 电池详情展开时，先隔 1.5 秒、之后每 5 秒统计一次各 App 的 CPU 占用。
+    private func updateEnergySampling() {
+        guard panelVisible, batteryDetailVisible, battery.hasBattery else {
+            energyTask?.cancel()
+            energyTask = nil
+            energyHogs = nil
+            return
+        }
+        guard energyTask == nil else { return }
+        energyTask = Task { [weak self] in
+            var previous = await Task.detached { EnergyUsage.sample() }.value
+            var smoothed: [pid_t: Double] = [:]
+            var interval = Duration.seconds(1.5)
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled else { return }
+                let current = await Task.detached { EnergyUsage.sample() }.value
+                // 新旧各占一半，列表不会跟着瞬间的波动跳来跳去。
+                smoothed = EnergyUsage.usage(from: previous, to: current).reduce(into: [:]) { result, item in
+                    result[item.key] = smoothed[item.key].map { ($0 + item.value) / 2 } ?? item.value
+                }
+                previous = current
+                self?.applyEnergy(smoothed)
+                interval = .seconds(5)
+            }
+        }
+    }
+
+    private func applyEnergy(_ usage: [pid_t: Double]) {
+        let hogs = usage.compactMap { pid, cpu -> EnergyHog? in
+            guard cpu >= EnergyUsage.threshold,
+                  let app = NSRunningApplication(processIdentifier: pid),
+                  app.activationPolicy == .regular,
+                  let name = app.localizedName
+            else { return nil }
+            return EnergyHog(pid: pid, name: name, cpu: cpu)
+        }
+        energyHogs = Array(hogs.sorted { $0.cpu > $1.cpu }.prefix(5))
+    }
+
+    /// 切到使用大量能耗的那个 App。
+    func activate(_ hog: EnergyHog) {
+        onClosePanel?()
+        NSRunningApplication(processIdentifier: hog.pid)?.activate()
+    }
+
     // MARK: - 事件驱动的数据
 
     private func apply(_ info: BatteryInfo) {
         battery = info
+        refreshChargeLimit()
         setReading(.battery, .battery(info))
         setIndicator(.charging, info.power == .charging)
         setIndicator(.pluggedIn, info.power != .battery)

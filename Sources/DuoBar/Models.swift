@@ -21,6 +21,12 @@ struct BatteryInfo: Sendable, Equatable {
     /// 预计多久充满；系统还在计算时为 nil。
     var minutesToFull: Int?
     var lowPowerMode: Bool
+    /// 高电量模式（只有部分 Mac 有）。
+    var highPowerMode = false
+    /// 电源适配器功率不够，充得慢。
+    var slowCharger = false
+    /// 系统认为电池需要维修。
+    var serviceRecommended = false
 
     static let placeholder = BatteryInfo(
         hasBattery: false, percent: 100, power: .pluggedIn, isCharged: true,

@@ -19,6 +19,70 @@ extension BatteryInfo {
         }
     }
 
+    /// 面板里电池那一格的小字，和系统电池菜单的标题一样，比如“84%，正在充电”。
+    func summary(limit: ChargeLimitState?) -> String {
+        guard hasBattery else { return "电源适配器" }
+        switch power {
+        case .battery: return "\(percent)%"
+        case .charging: return "\(percent)%，正在充电"
+        case .pluggedIn:
+            if isCharged || percent >= 100 { return "\(percent)%，已充满电" }
+            return limit?.source != nil ? "\(percent)%，暂停充电" : "\(percent)%，已连接电源"
+        }
+    }
+
+    var powerSourceText: String {
+        power == .battery ? "电源：电池" : "电源：电源适配器"
+    }
+
+    /// 电池菜单标题下面的说明，说法和系统电池菜单一致。
+    func statusLines(limit: ChargeLimitState?) -> [String] {
+        guard hasBattery else { return [] }
+        var lines: [String] = []
+        switch power {
+        case .battery:
+            lines.append(minutesToEmpty.map { "约可使用 \(Self.duration($0))" } ?? "正在估算剩余时间…")
+            if isLow { lines.append("尽快插入电源充电") }
+        case .charging:
+            if let limit, let source = limit.source, percent < limit.limit {
+                lines.append(source == .manual ? "正在充电至 \(limit.limit)% 上限" : "电量达到 \(limit.limit)% 时将停止充电")
+            } else if let minutesToFull {
+                lines.append("完全充满电还需 \(Self.duration(minutesToFull))")
+            }
+        case .pluggedIn:
+            if isCharged || percent >= 100 {
+                lines.append("已充满电")
+            } else if let limit, let source = limit.source {
+                if source == .manual {
+                    lines.append("已充电至 \(limit.limit)% 上限")
+                } else {
+                    lines.append("暂停充电")
+                    if let deadline = limit.deadline { lines.append("将在\(Self.clockText(deadline))完成充电") }
+                }
+            } else {
+                lines.append("电池没有在充电")
+            }
+        }
+        if slowCharger, power != .battery { lines.append("慢充") }
+        if serviceRecommended { lines.append("建议维修") }
+        return lines
+    }
+
+    /// 能耗模式：自动、低电量或高电量。
+    var energyModeText: String {
+        if highPowerMode { return "高电量" }
+        return lowPowerMode ? "低电量" : "自动"
+    }
+
+    /// “18:30”，不是今天时加上“明天”或日期。
+    private static func clockText(_ date: Date) -> String {
+        let time = date.formatted(date: .omitted, time: .shortened)
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return " \(time) " }
+        if calendar.isDateInTomorrow(date) { return "明天 \(time) " }
+        return " \(date.formatted(.dateTime.month().day())) \(time) "
+    }
+
     static func duration(_ minutes: Int) -> String {
         let hours = minutes / 60, rest = minutes % 60
         if hours == 0 { return "\(rest) 分钟" }
