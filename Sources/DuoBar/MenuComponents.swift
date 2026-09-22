@@ -253,7 +253,8 @@ struct MenuDivider: View {
 /// macOS 26 起胶囊本身是系统的玻璃，跟着系统的玻璃样式和深浅变化；更早的系统用半透明的灰底。
 struct ModuleTile<Glyph: View>: View {
     var title: String
-    var subtitle: String
+    /// nil 时只显示标题，比如指示灯都没亮时。
+    var subtitle: String?
     var active: Bool
     var tint: Color?
     var expanded: Bool
@@ -276,10 +277,12 @@ struct ModuleTile<Glyph: View>: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(title)
                             .font(.system(size: 13, weight: .semibold))
-                        Text(subtitle)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                        if let subtitle {
+                            Text(subtitle)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
                     }
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -314,6 +317,30 @@ struct ModuleTile<Glyph: View>: View {
             Button(action: action) { circle }
                 .buttonStyle(.plain)
         }
+    }
+}
+
+/// 玻璃胶囊按钮，比如面板最下面的“设置”和“退出”。
+struct CapsuleButton: View {
+    var title: String
+    var symbol: String
+    var help: String?
+    var action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 13, weight: .medium))
+                .frame(maxWidth: .infinity)
+                .frame(height: 36)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .modifier(TileBackground(hovering: hovering, reveal: 1))
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .help(help ?? "")
     }
 }
 

@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case selfUpdate
         /// 打开面板停留几秒，打印位置，方便截下真实的样子。
         case panel(PanelTab?)
+        /// 打开设置窗口的某一页停留几秒，打印位置。
+        case settings(SettingsPage)
     }
 
     private let model = AppModel()
@@ -53,6 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 default: nil
                 }
                 await controller.debugShowPanel(tab: tab, appearance: appearance, seconds: 5)
+            case let .settings(page):
+                await controller.debugShowSettings(page: page, seconds: 5)
             case .selfUpdate:
                 await model.checkForUpdates(manual: true)
                 if let release = model.availableUpdate {

@@ -28,6 +28,8 @@ if let directory = argument(after: "--debug-snapshot") {
     debugAction = .updateReport(URL(fileURLWithPath: directory.isEmpty ? "updates" : directory))
 } else if arguments.contains("--debug-self-update") {
     debugAction = .selfUpdate
+} else if let page = argument(after: "--debug-settings") {
+    debugAction = .settings(SettingsPage(rawValue: page) ?? .icon)
 } else if let tab = argument(after: "--debug-panel") {
     // 可以跟 ring、center、dots、wifi，指定展开哪一项。
     debugAction = .panel(Slot.allCases.first { "\($0)" == tab }.map(PanelTab.slot) ?? (tab == "wifi" ? .wifi : nil))
