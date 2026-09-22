@@ -9,10 +9,8 @@ enum PanelTab: Hashable, Sendable {
 }
 
 /// 点击菜单栏图标后弹出的面板，样子和 macOS 26 的控制中心、菜单栏菜单一致：
-/// 平时是几个控制中心样式的胶囊，点其中一个就收起其他的，下面展开系统菜单样式的详情。
-///
-/// 打开时胶囊从同一个位置滑开，里面的三合一图标跟着拆开：外圈、中间和圆点各自落进一个胶囊的圆形图标里，
-/// 和 iPhone Duo 打开控制中心时一样。macOS 26 起胶囊是玻璃，滑开时像一滴水分成几滴。
+/// 平时是几个控制中心样式的胶囊（见 PanelTiles），点其中一个就收起其他的，下面展开系统菜单样式的详情。
+/// 打开时胶囊从同一个位置滑开，三合一图标跟着拆开，和 iPhone Duo 打开控制中心时一样。
 struct PanelView: View {
     let model: AppModel
     /// 仅用于渲染预览：展开的详情。
@@ -31,29 +29,12 @@ struct PanelView: View {
         return split ? 1 : 0
     }
 
-    /// 从上到下：外圈、中间、底部圆点。
-    private let slotOrder: [Slot] = [.ring, .center, .dots]
-    private static let tileSpacing: CGFloat = 8
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 玻璃挨得比这更近就会连在一起；胶囊停下时隔 8 点，是分开的。
-            TileGlassContainer(spacing: 6) {
-                VStack(spacing: Self.tileSpacing) {
-                    ForEach(Array(tabs.enumerated()), id: \.element) { index, item in
-                        if tab == nil || tab == item {
-                            SplitSlide(progress: splitProgress, index: index,
-                                       step: ModuleTile<EmptyView>.height + Self.tileSpacing) { reveal, progress in
-                                tile(item, reveal: reveal, progress: progress)
-                            }
-                            .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
+            PanelTiles(model: model, progress: splitProgress, selected: tab, onSelect: toggle)
+                .padding(.horizontal, 10)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
 
             if let tab {
                 detail(tab)
@@ -64,11 +45,18 @@ struct PanelView: View {
                 MenuDivider()
                 updateRow(release)
             }
-            MenuDivider()
-            MenuItem(title: "DuoBar 设置…") { model.openSettings() }
-            MenuItem(title: "退出 DuoBar") { NSApp.terminate(nil) }
+            // 展开了详情时和上面隔一条线；只有胶囊时直接接在下面。
+            if tab != nil || model.availableUpdate != nil {
+                MenuDivider()
+            }
+            HStack(spacing: 8) {
+                CapsuleButton(title: "设置", symbol: "gearshape", help: "打开 DuoBar 设置") { model.openSettings() }
+                CapsuleButton(title: "退出", symbol: "power", help: "退出 DuoBar") { NSApp.terminate(nil) }
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 4)
         }
-        .padding(.bottom, 6)
+        .padding(.bottom, 10)
         .frame(width: MenuMetrics.width, alignment: .top)
         .onChange(of: model.panelVisible, initial: true) { _, visible in
             guard previewTab == nil, previewSplit == nil else { return }
@@ -93,15 +81,6 @@ struct PanelView: View {
         }
     }
 
-    /// 要显示的胶囊：图标上有的位置，网络不在图标上时再加一个 Wi-Fi。
-    private var tabs: [PanelTab] {
-        var result = slotOrder.filter { model.layout[$0] != nil }.map(PanelTab.slot)
-        if showsWiFiControls, !model.layout.metricKinds.contains(.network) {
-            result.append(.wifi)
-        }
-        return result
-    }
-
     private var showsWiFiControls: Bool {
         model.showWiFiControls && model.network.hasWiFiHardware
     }
@@ -115,88 +94,6 @@ struct PanelView: View {
         withAnimation(.snappy(duration: 0.3)) {
             selectedTab = selectedTab == target ? nil : target
         }
-    }
-
-    // MARK: - 胶囊
-
-    /// 胶囊上的文字、图标状态，以及点圆形图标能做的事。
-    private struct TileInfo {
-        var title: String
-        var subtitle: String
-        var active = false
-        var tint: Color?
-        var iconAction: (() -> Void)?
-        var iconHelp: String?
-    }
-
-    @ViewBuilder
-    private func tile(_ item: PanelTab, reveal: Double, progress: CGFloat) -> some View {
-        switch item {
-        case .wifi:
-            // 不是三合一图标的一部分，等胶囊滑到位再出现。
-            let info = networkInfo(title: "Wi-Fi")
-            ModuleTile(title: info.title, subtitle: info.subtitle, active: info.active, tint: info.tint,
-                       expanded: tab == item, reveal: reveal, iconAction: info.iconAction, iconHelp: info.iconHelp,
-                       action: { toggle(item) }) {
-                SymbolGlyph(name: model.network.wifiPowered ? "wifi" : "wifi.slash",
-                            variable: model.network.wifiAssociated ? Double(max(model.network.signalLevel, 1)) / 4 : nil)
-                    .opacity(reveal)
-            }
-        case let .slot(slot):
-            if let content = model.layout[slot] {
-                let info = info(for: content)
-                ModuleTile(title: info.title, subtitle: info.subtitle, active: info.active, tint: info.tint,
-                           expanded: tab == item, reveal: reveal, iconAction: info.iconAction, iconHelp: info.iconHelp,
-                           action: { toggle(item) }) {
-                    DuoPartGlyph(slot: slot, state: model.iconState, progress: progress,
-                                 color: info.active ? Color.fixedLight(info.tint ?? .accentColor) : .primary,
-                                 onWhite: info.active)
-                        .frame(width: 36, height: 36)
-                }
-            }
-        }
-    }
-
-    private func info(for content: SlotContent) -> TileInfo {
-        switch content {
-        case .metric(.network): return networkInfo(title: model.network.link == .ethernet ? "网络" : "Wi-Fi")
-        case .metric(.battery): return batteryInfo
-        case .metric(.volume): return volumeInfo
-        case let .metric(kind): return TileInfo(title: kind.title, subtitle: model.reading(kind).value)
-        case .indicators: return indicatorsInfo
-        }
-    }
-
-    private func networkInfo(title: String) -> TileInfo {
-        let network = model.network
-        let canToggle = network.hasWiFiHardware && network.link != .ethernet
-        return TileInfo(
-            title: title, subtitle: network.headline,
-            active: network.link != .none && network.link != .other || network.wifiAssociated,
-            iconAction: canToggle ? { model.setWiFiPower(!network.wifiPowered) } : nil,
-            iconHelp: network.wifiPowered ? "关闭 Wi-Fi" : "打开 Wi-Fi"
-        )
-    }
-
-    private var batteryInfo: TileInfo {
-        let battery = model.battery
-        let tint: Color? = if battery.lowPowerMode { .yellow } else if battery.power != .battery { .green }
-            else if battery.isLow { .red } else { nil }
-        return TileInfo(title: battery.hasBattery ? "电池" : "电源", subtitle: battery.summary(limit: model.chargeLimit),
-                        active: battery.power != .battery, tint: tint)
-    }
-
-    private var volumeInfo: TileInfo {
-        let muted = model.indicatorStates[.muted] == true
-        return TileInfo(title: "声音", subtitle: model.reading(.volume).value, active: !muted,
-                        iconAction: { model.setMuted(!muted) }, iconHelp: muted ? "取消静音" : "静音")
-    }
-
-    private var indicatorsInfo: TileInfo {
-        let kinds = model.layout.indicators.compactMap { $0 }
-        let lit = kinds.filter { model.indicatorStates[$0] == true }
-        return TileInfo(title: "指示灯", subtitle: lit.isEmpty ? "都没有亮" : lit.map(\.title).joined(separator: "、"),
-                        active: !lit.isEmpty)
     }
 
     // MARK: - 展开的详情
@@ -278,47 +175,11 @@ struct PanelView: View {
             MenuTitleRow(title: "指示灯") { EmptyView() }
             ForEach(Array(model.layout.indicators.enumerated()), id: \.offset) { _, kind in
                 if let kind {
-                    let on = model.indicatorStates[kind] == true
-                    MenuRow(title: kind.title, help: kind.summary) {
-                        IconCircle(active: on, tint: on && model.indicatorColors ? kind.tint?.color : nil) {
-                            IndicatorIcon(kind: kind, size: 12)
-                        }
-                    } trailing: {
-                        indicatorControl(kind)
-                    }
+                    IndicatorRow(model: model, kind: kind)
                 }
             }
-        }
-    }
-
-    /// 能直接操作的指示灯给开关，其他的显示状态。
-    @ViewBuilder
-    private func indicatorControl(_ kind: IndicatorKind) -> some View {
-        switch kind {
-        case .wifi where model.network.hasWiFiHardware:
-            Toggle("Wi-Fi", isOn: Binding(
-                get: { model.network.wifiPowered },
-                set: { model.setWiFiPower($0) }
-            ))
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .labelsHidden()
-            .disabled(model.wifiSwitching)
-        case .muted:
-            Toggle("静音", isOn: Binding(
-                get: { model.indicatorStates[.muted] == true },
-                set: { model.setMuted($0) }
-            ))
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .labelsHidden()
-        case .bluetooth where model.bluetoothAccess == .denied:
-            Button("开启权限") { model.requestBluetoothAccess() }
-                .controlSize(.small)
-        default:
-            Text(model.indicatorText(kind))
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+            MenuDivider()
+            MenuItem(title: "选择显示哪些指示灯…") { model.openSettings(page: .indicators) }
         }
     }
 
@@ -357,6 +218,77 @@ struct PanelView: View {
         case .downloading: "正在下载…"
         case .installing: "正在安装…"
         case .idle, .checking, .upToDate, .available: nil
+        }
+    }
+}
+
+// MARK: - 指示灯
+
+/// 指示灯的一行：点整行打开对应的设置（VPN 打开 VPN 设置，内存紧张打开活动监视器）；
+/// Wi-Fi 和静音在右边另有开关，可以直接开关。
+private struct IndicatorRow: View {
+    let model: AppModel
+    let kind: IndicatorKind
+
+    var body: some View {
+        let on = model.indicatorStates[kind] == true
+        HStack(spacing: 9) {
+            Button {
+                model.openSettings(for: kind)
+            } label: {
+                HStack(spacing: 9) {
+                    IconCircle(active: on, tint: on && model.indicatorColors ? kind.tint?.color : nil) {
+                        IndicatorIcon(kind: kind, size: 12)
+                    }
+                    Text(kind.title)
+                        .font(.system(size: 13))
+                    Spacer(minLength: 8)
+                    if !hasSwitch, !needsPermission {
+                        Text(model.indicatorText(kind))
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("\(kind.summary)点一下打开“\(kind.settingsTitle)”。")
+            control
+        }
+        .frame(minHeight: 32)
+        .menuRowHighlight()
+    }
+
+    private var hasSwitch: Bool {
+        (kind == .wifi && model.network.hasWiFiHardware) || kind == .muted
+    }
+
+    private var needsPermission: Bool {
+        kind == .bluetooth && model.bluetoothAccess == .denied
+    }
+
+    @ViewBuilder
+    private var control: some View {
+        if kind == .wifi, hasSwitch {
+            Toggle("Wi-Fi", isOn: Binding(
+                get: { model.network.wifiPowered },
+                set: { model.setWiFiPower($0) }
+            ))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .labelsHidden()
+            .disabled(model.wifiSwitching)
+        } else if kind == .muted {
+            Toggle("静音", isOn: Binding(
+                get: { model.indicatorStates[.muted] == true },
+                set: { model.setMuted($0) }
+            ))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .labelsHidden()
+        } else if needsPermission {
+            Button("开启权限") { model.requestBluetoothAccess() }
+                .controlSize(.small)
         }
     }
 }
@@ -491,26 +423,5 @@ private struct VolumeDetail: View {
             MenuDivider()
             MenuItem(title: "声音设置…") { model.openSystemSettings(.sound) }
         }
-    }
-}
-
-/// 拆分动画里的一个胶囊：跟着进度从第一个胶囊的位置滑到自己的位置。
-/// 每一帧都拿到实际的进度，所以文字和圆底可以等胶囊快分开了再出现，不会和上面的胶囊叠在一起。
-private struct SplitSlide<Content: View>: View, Animatable {
-    var progress: CGFloat
-    var index: Int
-    /// 相邻两个胶囊的距离。
-    var step: CGFloat
-    @ViewBuilder var content: (_ reveal: Double, _ progress: CGFloat) -> Content
-
-    nonisolated var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    var body: some View {
-        content(index == 0 ? 1 : Double(smoothstep(0.45, 0.95, progress)), progress)
-            // 拆分前所有胶囊都叠在第一个的位置。
-            .offset(y: -CGFloat(index) * step * (1 - progress))
     }
 }

@@ -66,11 +66,52 @@ extension IndicatorKind {
 enum SettingsPane: String, Sendable {
     case wifi = "com.apple.wifi-settings-extension"
     case network = "com.apple.Network-Settings.extension"
+    case vpn = "com.apple.NetworkExtensionSettingsUI.NESettingsUIExtension"
     case battery = "com.apple.Battery-Settings.extension"
     case sound = "com.apple.Sound-Settings.extension"
     case bluetooth = "com.apple.BluetoothSettings"
+    case displays = "com.apple.Displays-Settings.extension"
+    case keyboard = "com.apple.Keyboard-Settings.extension"
     case storage = "com.apple.settings.Storage"
     case menuBar = "com.apple.ControlCenter-Settings.extension"
+
+    var title: String {
+        switch self {
+        case .wifi: "Wi-Fi 设置"
+        case .network: "网络设置"
+        case .vpn: "VPN 设置"
+        case .battery: "电池设置"
+        case .sound: "声音设置"
+        case .bluetooth: "蓝牙设置"
+        case .displays: "显示器设置"
+        case .keyboard: "键盘设置"
+        case .storage: "存储空间设置"
+        case .menuBar: "菜单栏设置"
+        }
+    }
+}
+
+extension IndicatorKind {
+    /// 在面板里点这一项时打开的系统设置页；内存紧张打开活动监视器，这里是 nil。
+    var settingsPane: SettingsPane? {
+        switch self {
+        case .bluetooth, .headphones: .bluetooth
+        case .wifi: .wifi
+        case .internet, .hotspot, .ethernet: .network
+        case .vpn: .vpn
+        case .microphone, .muted: .sound
+        case .charging, .pluggedIn, .lowPower, .lowBattery: .battery
+        case .externalDisplay: .displays
+        case .capsLock: .keyboard
+        case .diskLow: .storage
+        case .memoryPressure: nil
+        }
+    }
+
+    /// 点这一项会打开什么，用在鼠标悬停的说明里。
+    var settingsTitle: String {
+        settingsPane?.title ?? "活动监视器"
+    }
 }
 
 enum UpdateStatus: Equatable, Sendable {
@@ -172,6 +213,9 @@ final class AppModel {
             updateEnergySampling()
         }
     }
+
+    /// 请设置窗口切到这一页，比如从面板的“指示灯设置…”打开；切过去后清空。
+    var requestedSettingsPage: SettingsPage?
 
     /// 面板里的电池详情是否展开。展开时才统计哪些 App 使用大量能耗。
     var batteryDetailVisible = false {
@@ -418,8 +462,19 @@ final class AppModel {
         layout = .standard
     }
 
-    func openSettings() {
+    /// 打开 DuoBar 的设置窗口；page 不为 nil 时切到那一页。
+    func openSettings(page: SettingsPage? = nil) {
+        requestedSettingsPage = page
         onOpenSettings?()
+    }
+
+    /// 打开指示灯对应的设置，比如 VPN 打开“系统设置”里的 VPN，内存紧张打开活动监视器。
+    func openSettings(for kind: IndicatorKind) {
+        if let pane = kind.settingsPane {
+            openSystemSettings(pane)
+        } else {
+            openActivityMonitor()
+        }
     }
 
     /// 打开“系统设置 › 菜单栏”，用户可以在那里隐藏系统自带的 Wi-Fi 和电池图标。

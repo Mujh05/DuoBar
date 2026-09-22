@@ -9,7 +9,7 @@ struct IconSettingsPage: View {
         Section {
             IconPreview(model: model)
         } footer: {
-            SectionNote("点左边的图标，预览打开面板时的展开动画。")
+            SectionNote("点左边的胶囊，预览打开面板时的拆分动画。")
         }
 
         Section {
@@ -140,7 +140,7 @@ struct IconSettingsPage: View {
     }
 }
 
-/// 最上面的预览：点左边的图标播放打开面板时的展开动画，右边是菜单栏里的实际效果。
+/// 最上面的预览：左边是面板顶部的胶囊，点一下播放和面板里一样的拆分动画；右边是菜单栏里的实际效果。
 private struct IconPreview: View {
     let model: AppModel
     @State private var split = false
@@ -176,17 +176,18 @@ private struct IconPreview: View {
         .onDisappear { demo?.cancel() }
     }
 
-    /// 面板顶部的图标，和面板一样跟随系统的浅色或深色外观。
+    /// 面板顶部的胶囊，和面板里用的是同一份，平时是合起来的样子。
     private var glyph: some View {
         Button(action: playDemo) {
-            SplitGlyphView(progress: split ? 1 : 0, state: model.iconState)
-                .frame(width: 288, height: 104)
-                .padding(.horizontal, 12)
-                .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            PanelTiles(model: model, progress: split ? 1 : 0, shrinksWhenMerged: true)
+                .frame(width: 300)
+                .padding(10)
+                .background(.fill.quaternary,
+                            in: RoundedRectangle(cornerRadius: MenuPanelController.cornerRadius, style: .continuous))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("点击预览打开面板时的展开动画")
+        .help("点击预览打开面板时的拆分动画")
     }
 
     private var menuBars: some View {
@@ -202,7 +203,7 @@ private struct IconPreview: View {
         .fixedSize()
     }
 
-    /// 拆开，停一会儿，再合回去。
+    /// 平时是合起来的样子：拆开，停一会儿，再合回去。
     private func playDemo() {
         demo?.cancel()
         guard !reduceMotion else {
@@ -210,10 +211,11 @@ private struct IconPreview: View {
             return
         }
         demo = Task { @MainActor in
-            withAnimation(.spring(duration: 0.8, bounce: 0.22)) { split = true }
+            // 和面板打开时的弹簧一样。
+            withAnimation(.spring(duration: 0.65, bounce: 0.2)) { split = true }
             try? await Task.sleep(for: .seconds(2.2))
             guard !Task.isCancelled else { return }
-            withAnimation(.spring(duration: 0.8, bounce: 0.12)) { split = false }
+            withAnimation(.spring(duration: 0.65, bounce: 0.1)) { split = false }
         }
     }
 }

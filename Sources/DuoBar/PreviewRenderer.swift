@@ -112,7 +112,6 @@ enum PreviewRenderer {
         write(iconSheet(), to: directory.appendingPathComponent("icons.png"))
         write(percentTransitionSheet(), to: directory.appendingPathComponent("percent-transition.png"))
         write(scaleSheet(), to: directory.appendingPathComponent("scales.png"))
-        render(splitSheet(), to: directory.appendingPathComponent("split.png"))
         render(tileSplitSheet(), to: directory.appendingPathComponent("tile-split.png"))
 
         // 面板用本机的真实数据，等网络状态回调先到。
@@ -156,34 +155,6 @@ enum PreviewRenderer {
         }
         .padding(16)
         .background(Color(white: 0.85))
-    }
-
-    static func splitSheet() -> some View {
-        let frames: [CGFloat] = [0, 0.2, 0.4, 0.6, 0.8, 1]
-        return HStack(alignment: .top, spacing: 16) {
-            frameColumn(frames, samples[3].1, dark: false)
-            frameColumn(frames, samples[5].1, dark: false)
-            frameColumn(frames, samples[6].1, dark: true)
-        }
-        .padding(16)
-        .background(Color.white)
-    }
-
-    private static func frameColumn(_ frames: [CGFloat], _ state: IconState, dark: Bool) -> some View {
-        VStack(spacing: 10) {
-            ForEach(frames, id: \.self) { progress in
-                VStack(spacing: 2) {
-                    Text("progress \(progress, specifier: "%.1f")")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                    SplitGlyphView(progress: progress, state: state)
-                        .frame(width: 288, height: 76)
-                }
-                .padding(8)
-                .background(RoundedRectangle(cornerRadius: 10).fill(dark ? Color(white: 0.16) : Color(white: 0.95)))
-            }
-        }
-        .environment(\.colorScheme, dark ? .dark : .light)
     }
 
     // MARK: - 面板

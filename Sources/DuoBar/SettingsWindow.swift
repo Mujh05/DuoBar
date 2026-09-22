@@ -65,6 +65,14 @@ struct SettingsRoot: View {
         }
         .toolbar(removing: .sidebarToggle)
         .navigationTitle(page.title)
+        .onAppear(perform: showRequestedPage)
+        .onChange(of: model.requestedSettingsPage) { showRequestedPage() }
+    }
+
+    private func showRequestedPage() {
+        guard let requested = model.requestedSettingsPage else { return }
+        selection = requested
+        model.requestedSettingsPage = nil
     }
 
     @ViewBuilder

@@ -166,6 +166,24 @@ final class StatusController: NSObject {
         }
     }
 
+    /// 开发用：打开设置窗口的某一页停留几秒，打印窗口位置，方便用 screencapture 截下真实效果。
+    func debugShowSettings(page: SettingsPage, seconds: Double) async {
+        model.requestedSettingsPage = page
+        settings.show(activate: false)
+        let wait = ProcessInfo.processInfo.environment["DUOBAR_DEBUG_WAIT"].flatMap(Double.init) ?? 1.5
+        try? await Task.sleep(for: .seconds(wait))
+        if let window = settings.contentView?.window {
+            let screenTop = (window.screen ?? NSScreen.main)?.frame.maxY ?? 0
+            print(String(format: "settings frame (screencapture -R): %.0f,%.0f,%.0f,%.0f",
+                         window.frame.minX, screenTop - window.frame.maxY, window.frame.width, window.frame.height))
+            // 窗口可能被别的 App 挡住：用 screencapture -l 按编号只截这个窗口，不会截到别的内容。
+            print("settings window (screencapture -l):", window.windowNumber)
+            fflush(stdout)
+        }
+        try? await Task.sleep(for: .seconds(seconds))
+        settings.close()
+    }
+
     /// 开发用：打开面板（可以指定展开哪一项和深浅色）并停留几秒，打印它在屏幕上的位置，方便用 screencapture 截下真实的玻璃效果。
     func debugShowPanel(tab: PanelTab?, appearance: NSAppearance?, seconds: Double) async {
         guard let button = statusItem.button else { return }
