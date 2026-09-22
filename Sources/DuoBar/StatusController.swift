@@ -3,17 +3,15 @@ import SwiftUI
 
 /// 菜单栏图标和弹出面板。
 @MainActor
-final class StatusController: NSObject, NSPopoverDelegate {
+final class StatusController: NSObject {
     private let model: AppModel
     private var statusItem: NSStatusItem
-    private let popover = NSPopover()
+    private let panel: MenuPanelController
     private let settings: SettingsWindowController
     private var percentAnimationTask: Task<Void, Never>?
     private var embeddedPercentProgress: CGFloat = 0
     private var embeddedPercentTarget: CGFloat = 0
     private var percentStyleInitialized = false
-    /// 面板打开期间监听其他 App 上的点击，用来关闭面板。
-    private var outsideClickMonitor: Any?
 
     /// 系统按这个名字记住图标在菜单栏里的位置（用户按住 ⌘ 拖动后也会记住）。
     private static let autosaveName = "DuoBar"
@@ -22,31 +20,28 @@ final class StatusController: NSObject, NSPopoverDelegate {
         self.model = model
         settings = SettingsWindowController(model: model)
         statusItem = Self.makeStatusItem()
+        panel = MenuPanelController(rootView: PanelView(model: model))
         super.init()
 
-        let host = NSHostingController(rootView: PanelView(model: model))
-        host.sizingOptions = .preferredContentSize
-        popover.contentViewController = host
-        popover.behavior = .transient
-        popover.delegate = self
-
+        panel.onShow = { [weak model] in model?.panelVisible = true }
+        panel.onClose = { [weak model] in model?.panelVisible = false }
         model.onIconChange = { [weak self] in self?.updateButton() }
         model.onOpenSettings = { [weak self] in
-            self?.popover.performClose(nil)
+            self?.panel.close()
             self?.settings.show()
         }
         model.askPassword = { [weak self] ssid in
             self?.promptPassword(for: ssid)
         }
         model.onClosePanel = { [weak self] in
-            self?.popover.performClose(nil)
+            self?.panel.close()
         }
         configureButton()
     }
 
     /// 用系统的对话框问 Wi-Fi 密码。密码直接交给 CoreWLAN，DuoBar 不保存。
     private func promptPassword(for ssid: String) -> String? {
-        popover.performClose(nil)
+        panel.close()
         let alert = NSAlert()
         alert.messageText = "输入“\(ssid)”的密码"
         alert.informativeText = "密码会直接交给系统用来加入这个网络，DuoBar 本身不会保存。"
@@ -164,12 +159,33 @@ final class StatusController: NSObject, NSPopoverDelegate {
     }
 
     @objc private func togglePanel(_ sender: NSStatusBarButton) {
-        if popover.isShown {
-            popover.performClose(sender)
+        if panel.isShown {
+            panel.close()
         } else {
-            NSApp.activate()
-            popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+            panel.show(below: sender)
         }
+    }
+
+    /// 开发用：打开面板（可以指定展开哪一项和深浅色）并停留几秒，打印它在屏幕上的位置，方便用 screencapture 截下真实的玻璃效果。
+    func debugShowPanel(tab: PanelTab?, appearance: NSAppearance?, seconds: Double) async {
+        guard let button = statusItem.button else { return }
+        let split = ProcessInfo.processInfo.environment["DUOBAR_DEBUG_SPLIT"].flatMap(Double.init).map { CGFloat($0) }
+        let preview = MenuPanelController(rootView: PanelView(model: model, previewTab: tab, previewSplit: split),
+                                          appearance: appearance)
+        preview.onShow = { [weak model] in model?.panelVisible = true }
+        preview.onClose = { [weak model] in model?.panelVisible = false }
+        preview.show(below: button)
+        // 等采样、扫描和面板的淡入完成；DUOBAR_DEBUG_WAIT 可以改等待的秒数。
+        let wait = ProcessInfo.processInfo.environment["DUOBAR_DEBUG_WAIT"].flatMap(Double.init) ?? 1.5
+        try? await Task.sleep(for: .seconds(wait))
+        let frame = preview.frame
+        let screenTop = (button.window?.screen ?? NSScreen.main)?.frame.maxY ?? 0
+        print(String(format: "panel frame (screencapture -R): %.0f,%.0f,%.0f,%.0f",
+                     frame.minX, screenTop - frame.maxY, frame.width, frame.height))
+        fflush(stdout)
+        try? await Task.sleep(for: .seconds(seconds))
+        preview.close()
+        try? await Task.sleep(for: .seconds(0.3))
     }
 
     /// 开发用：把菜单栏按钮和打开过程中的面板截成 PNG，不需要屏幕录制权限。
@@ -182,22 +198,20 @@ final class StatusController: NSObject, NSPopoverDelegate {
         if ProcessInfo.processInfo.environment["DUOBAR_PRETEND_VERSION"] != nil {
             await model.checkForUpdates(manual: true)
         }
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        panel.show(below: button)
         var elapsed = 0.0
-        for moment in [0.15, 0.35, 0.55, 3.0] {
+        for moment in [0.15, 3.0] {
             try? await Task.sleep(for: .seconds(moment - elapsed))
             elapsed = moment
-            if let view = popover.contentViewController?.view {
-                Self.snapshot(view, to: directory.appendingPathComponent(String(format: "panel-%.2fs.png", moment)))
-            }
+            Self.snapshot(panel.contentView, to: directory.appendingPathComponent(String(format: "panel-%.2fs.png", moment)))
         }
-        print("popover size:", popover.contentSize)
-        popover.performClose(nil)
+        print("panel frame:", panel.frame)
+        panel.close()
 
-        // 每个位置展开后的样子（面板打开时扫描到的网络还留着）。
+        // 每个位置展开后的样子（面板打开时扫描到的网络还留着）。离屏渲染画不出玻璃，垫一层灰底。
         for slot in Slot.allCases where model.layout[slot] != nil {
-            await snapshotOffscreen(PanelView(model: model, previewSplit: true, previewTab: .slot(slot)),
-                                    width: 320, to: directory.appendingPathComponent("panel-tab-\(slot).png"))
+            await snapshotOffscreen(PanelView(model: model, previewTab: .slot(slot)).background(Color(white: 0.9)),
+                                    width: MenuMetrics.width, to: directory.appendingPathComponent("panel-tab-\(slot).png"))
         }
 
         // 设置窗口：等采样把所有状态都读一遍再截图。
@@ -246,33 +260,4 @@ final class StatusController: NSObject, NSPopoverDelegate {
         PreviewRenderer.write(rep, to: url)
     }
 
-    func popoverWillShow(_ notification: Notification) {
-        model.panelVisible = true
-    }
-
-    // 菜单栏 App 不一定能真正成为前台 App（macOS 14 起激活需要前台 App 配合），
-    // 这时点其他 App 的窗口或桌面，transient 面板收不到关闭信号，所以自己监听。
-    // 只监听鼠标点击，不需要辅助功能权限。
-    func popoverDidShow(_ notification: Notification) {
-        removeOutsideClickMonitor()
-        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.popover.performClose(nil)
-            }
-        }
-    }
-
-    func popoverDidClose(_ notification: Notification) {
-        removeOutsideClickMonitor()
-        model.panelVisible = false
-    }
-
-    private func removeOutsideClickMonitor() {
-        if let monitor = outsideClickMonitor {
-            NSEvent.removeMonitor(monitor)
-            outsideClickMonitor = nil
-        }
-    }
 }

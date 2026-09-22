@@ -14,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case updateReport(URL)
         /// 检查更新并直接安装，和点“立即更新”一样：成功时替换自己并重新打开。
         case selfUpdate
+        /// 打开面板停留几秒，打印位置，方便截下真实的样子。
+        case panel(PanelTab?)
     }
 
     private let model = AppModel()
@@ -44,6 +46,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 print(await WiFiControl.debugSummary())
             case let .updateReport(directory):
                 await Self.reportUpdate(downloadingTo: directory)
+            case let .panel(tab):
+                let appearance: NSAppearance? = switch ProcessInfo.processInfo.environment["DUOBAR_DEBUG_APPEARANCE"] {
+                case "dark": NSAppearance(named: .darkAqua)
+                case "light": NSAppearance(named: .aqua)
+                default: nil
+                }
+                await controller.debugShowPanel(tab: tab, appearance: appearance, seconds: 5)
             case .selfUpdate:
                 await model.checkForUpdates(manual: true)
                 if let release = model.availableUpdate {

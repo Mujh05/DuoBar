@@ -4,180 +4,213 @@ import SwiftUI
 enum PanelTab: Hashable, Sendable {
     /// 某个位置显示的内容。
     case slot(Slot)
-    /// 网络不在图标上时，从底部按钮打开的 Wi-Fi 控制。
+    /// 网络不在图标上时，单独的 Wi-Fi 控制。
     case wifi
 }
 
-/// 点击菜单栏图标后弹出的面板。打开时三合一图标会拆成三个独立图标，和 iPhone Duo 打开控制中心时一样；
-/// 平时只显示这三个图标，点其中一个才展开它的详情和相应的设置，保持面板紧凑。
+/// 点击菜单栏图标后弹出的面板，样子和 macOS 26 的控制中心、菜单栏菜单一致：
+/// 平时是几个控制中心样式的胶囊，点其中一个就收起其他的，下面展开系统菜单样式的详情。
+///
+/// 打开时胶囊从同一个位置滑开，里面的三合一图标跟着拆开：外圈、中间和圆点各自落进一个胶囊的圆形图标里，
+/// 和 iPhone Duo 打开控制中心时一样。macOS 26 起胶囊是玻璃，滑开时像一滴水分成几滴。
 struct PanelView: View {
     let model: AppModel
-    /// 仅用于渲染预览：固定为拆开或合体，不播放动画。
-    var previewSplit: Bool?
     /// 仅用于渲染预览：展开的详情。
     var previewTab: PanelTab?
-    @State private var animatedSplit = false
+    /// 仅用于渲染预览：固定的拆分进度，0 是合体，1 是拆开。
+    var previewSplit: CGFloat?
     @State private var selectedTab: PanelTab?
-    @State private var hoveredSlot: Slot?
+    @State private var split = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var split: Bool { previewSplit ?? animatedSplit }
     private var tab: PanelTab? { previewTab ?? selectedTab }
 
-    /// 拆开后的顺序：底部圆点在左，中间在中，外圈在右。
-    private let slotOrder: [Slot] = [.dots, .center, .ring]
+    private var splitProgress: CGFloat {
+        if let previewSplit { return previewSplit }
+        if previewTab != nil { return 1 }
+        return split ? 1 : 0
+    }
+
+    /// 从上到下：外圈、中间、底部圆点。
+    private let slotOrder: [Slot] = [.ring, .center, .dots]
+    private static let tileSpacing: CGFloat = 8
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header
-                .padding(.bottom, 10)
-            if let tab, hasContent(tab) {
-                Divider()
+            // 玻璃挨得比这更近就会连在一起；胶囊停下时隔 8 点，是分开的。
+            TileGlassContainer(spacing: 6) {
+                VStack(spacing: Self.tileSpacing) {
+                    ForEach(Array(tabs.enumerated()), id: \.element) { index, item in
+                        if tab == nil || tab == item {
+                            SplitSlide(progress: splitProgress, index: index,
+                                       step: ModuleTile<EmptyView>.height + Self.tileSpacing) { reveal, progress in
+                                tile(item, reveal: reveal, progress: progress)
+                            }
+                            .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+
+            if let tab {
                 detail(tab)
-                    .padding(.vertical, 12)
+                    .padding(.top, 4)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
             if let release = model.availableUpdate {
-                Divider()
-                updateBanner(release)
-                    .padding(.vertical, 10)
+                MenuDivider()
+                updateRow(release)
             }
-            Divider()
-            footer
+            MenuDivider()
+            MenuItem(title: "DuoBar 设置…") { model.openSettings() }
+            MenuItem(title: "退出 DuoBar") { NSApp.terminate(nil) }
         }
-        .padding(16)
-        .frame(width: 320)
+        .padding(.bottom, 6)
+        .frame(width: MenuMetrics.width, alignment: .top)
         .onChange(of: model.panelVisible, initial: true) { _, visible in
-            guard previewSplit == nil else { return }
+            guard previewTab == nil, previewSplit == nil else { return }
             if visible {
-                withAnimation(.spring(duration: 0.75, bounce: 0.22).delay(0.12)) { animatedSplit = true }
+                if reduceMotion {
+                    split = true
+                } else {
+                    withAnimation(.spring(duration: 0.65, bounce: 0.2).delay(0.05)) { split = true }
+                }
             } else {
-                // 下次打开时重新从合体开始，详情也收起来。
+                // 下次打开时重新从合体开始，也回到只有胶囊的样子。
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) {
-                    animatedSplit = false
                     selectedTab = nil
+                    split = false
                 }
             }
         }
-    }
-
-    // MARK: - 顶部：可以点的三个图标
-
-    private var header: some View {
-        VStack(spacing: 8) {
-            SplitGlyphView(progress: split ? 1 : 0, state: model.iconState)
-                .frame(height: 72)
-            HStack(spacing: 0) {
-                ForEach(slotOrder) { caption($0) }
-            }
-            .opacity(split ? 1 : 0)
-            .animation(.easeOut(duration: 0.3).delay(split ? 0.35 : 0), value: split)
-        }
-        .padding(.vertical, 6)
-        .background(slotHighlights)
-        .overlay(slotButtons)
-    }
-
-    private var slotHighlights: some View {
-        HStack(spacing: 4) {
-            ForEach(slotOrder) { slot in
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.primary.opacity(highlight(slot)))
-            }
-        }
-        .animation(.easeOut(duration: 0.15), value: tab)
-        .animation(.easeOut(duration: 0.15), value: hoveredSlot)
-    }
-
-    private func highlight(_ slot: Slot) -> Double {
-        if tab == .slot(slot) { return 0.09 }
-        if hoveredSlot == slot, canSelect(slot) { return 0.045 }
-        return 0
-    }
-
-    private var slotButtons: some View {
-        HStack(spacing: 4) {
-            ForEach(slotOrder) { slot in
-                Button {
-                    toggle(.slot(slot))
-                } label: {
-                    Color.clear.contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSelect(slot))
-                .onHover { inside in
-                    if inside {
-                        hoveredSlot = slot
-                    } else if hoveredSlot == slot {
-                        hoveredSlot = nil
-                    }
-                }
-                .help(canSelect(slot) ? "查看\(slotTitle(slot))" : "")
-                .accessibilityLabel(slotTitle(slot))
-            }
+        .onChange(of: showsBatteryDetail, initial: true) { _, visible in
+            model.batteryDetailVisible = visible
         }
     }
 
-    private func canSelect(_ slot: Slot) -> Bool {
-        split && model.layout[slot] != nil
-    }
-
-    private func slotTitle(_ slot: Slot) -> String {
-        model.layout[slot]?.title ?? slot.title
-    }
-
-    private func toggle(_ target: PanelTab) {
-        withAnimation(.snappy(duration: 0.25)) {
-            selectedTab = selectedTab == target ? nil : target
+    /// 要显示的胶囊：图标上有的位置，网络不在图标上时再加一个 Wi-Fi。
+    private var tabs: [PanelTab] {
+        var result = slotOrder.filter { model.layout[$0] != nil }.map(PanelTab.slot)
+        if showsWiFiControls, !model.layout.metricKinds.contains(.network) {
+            result.append(.wifi)
         }
+        return result
     }
-
-    private func hasContent(_ tab: PanelTab) -> Bool {
-        switch tab {
-        case let .slot(slot): model.layout[slot] != nil
-        case .wifi: showsWiFiControls
-        }
-    }
-
-    private func caption(_ slot: Slot) -> some View {
-        let text: (title: String, subtitle: String)? = switch model.layout[slot] {
-        case let .metric(kind): (model.reading(kind).value, kind.shortTitle)
-        case .indicators: (litSummary, "指示灯亮起")
-        case nil: nil
-        }
-        return VStack(spacing: 2) {
-            if let text {
-                Text(text.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .monospacedDigit()
-                Text(text.subtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(tab == .slot(slot) ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
-            }
-        }
-        .lineLimit(1)
-        .frame(maxWidth: .infinity)
-    }
-
-    private var litSummary: String {
-        let kinds = model.layout.indicators.compactMap { $0 }
-        let lit = kinds.filter { model.indicatorStates[$0] == true }.count
-        return "\(lit)/\(kinds.count)"
-    }
-
-    // MARK: - 展开的详情
 
     private var showsWiFiControls: Bool {
         model.showWiFiControls && model.network.hasWiFiHardware
     }
 
+    private var showsBatteryDetail: Bool {
+        guard case let .slot(slot) = tab else { return false }
+        return model.layout[slot] == .metric(.battery)
+    }
+
+    private func toggle(_ target: PanelTab) {
+        withAnimation(.snappy(duration: 0.3)) {
+            selectedTab = selectedTab == target ? nil : target
+        }
+    }
+
+    // MARK: - 胶囊
+
+    /// 胶囊上的文字、图标状态，以及点圆形图标能做的事。
+    private struct TileInfo {
+        var title: String
+        var subtitle: String
+        var active = false
+        var tint: Color?
+        var iconAction: (() -> Void)?
+        var iconHelp: String?
+    }
+
+    @ViewBuilder
+    private func tile(_ item: PanelTab, reveal: Double, progress: CGFloat) -> some View {
+        switch item {
+        case .wifi:
+            // 不是三合一图标的一部分，等胶囊滑到位再出现。
+            let info = networkInfo(title: "Wi-Fi")
+            ModuleTile(title: info.title, subtitle: info.subtitle, active: info.active, tint: info.tint,
+                       expanded: tab == item, reveal: reveal, iconAction: info.iconAction, iconHelp: info.iconHelp,
+                       action: { toggle(item) }) {
+                SymbolGlyph(name: model.network.wifiPowered ? "wifi" : "wifi.slash",
+                            variable: model.network.wifiAssociated ? Double(max(model.network.signalLevel, 1)) / 4 : nil)
+                    .opacity(reveal)
+            }
+        case let .slot(slot):
+            if let content = model.layout[slot] {
+                let info = info(for: content)
+                ModuleTile(title: info.title, subtitle: info.subtitle, active: info.active, tint: info.tint,
+                           expanded: tab == item, reveal: reveal, iconAction: info.iconAction, iconHelp: info.iconHelp,
+                           action: { toggle(item) }) {
+                    DuoPartGlyph(slot: slot, state: model.iconState, progress: progress,
+                                 color: info.active ? Color.fixedLight(info.tint ?? .accentColor) : .primary,
+                                 onWhite: info.active)
+                        .frame(width: 36, height: 36)
+                }
+            }
+        }
+    }
+
+    private func info(for content: SlotContent) -> TileInfo {
+        switch content {
+        case .metric(.network): return networkInfo(title: model.network.link == .ethernet ? "网络" : "Wi-Fi")
+        case .metric(.battery): return batteryInfo
+        case .metric(.volume): return volumeInfo
+        case let .metric(kind): return TileInfo(title: kind.title, subtitle: model.reading(kind).value)
+        case .indicators: return indicatorsInfo
+        }
+    }
+
+    private func networkInfo(title: String) -> TileInfo {
+        let network = model.network
+        let canToggle = network.hasWiFiHardware && network.link != .ethernet
+        return TileInfo(
+            title: title, subtitle: network.headline,
+            active: network.link != .none && network.link != .other || network.wifiAssociated,
+            iconAction: canToggle ? { model.setWiFiPower(!network.wifiPowered) } : nil,
+            iconHelp: network.wifiPowered ? "关闭 Wi-Fi" : "打开 Wi-Fi"
+        )
+    }
+
+    private var batteryInfo: TileInfo {
+        let battery = model.battery
+        let tint: Color? = if battery.lowPowerMode { .yellow } else if battery.power != .battery { .green }
+            else if battery.isLow { .red } else { nil }
+        return TileInfo(title: battery.hasBattery ? "电池" : "电源", subtitle: battery.summary(limit: model.chargeLimit),
+                        active: battery.power != .battery, tint: tint)
+    }
+
+    private var volumeInfo: TileInfo {
+        let muted = model.indicatorStates[.muted] == true
+        return TileInfo(title: "声音", subtitle: model.reading(.volume).value, active: !muted,
+                        iconAction: { model.setMuted(!muted) }, iconHelp: muted ? "取消静音" : "静音")
+    }
+
+    private var indicatorsInfo: TileInfo {
+        let kinds = model.layout.indicators.compactMap { $0 }
+        let lit = kinds.filter { model.indicatorStates[$0] == true }
+        return TileInfo(title: "指示灯", subtitle: lit.isEmpty ? "都没有亮" : lit.map(\.title).joined(separator: "、"),
+                        active: !lit.isEmpty)
+    }
+
+    // MARK: - 展开的详情
+
     @ViewBuilder
     private func detail(_ tab: PanelTab) -> some View {
         switch tab {
         case .wifi:
-            WiFiSection(model: model, summary: networkSummary)
+            WiFiSection(model: model)
         case let .slot(slot):
             switch model.layout[slot] {
+            case .metric(.network): networkDetail
+            case .metric(.battery): BatteryDetail(model: model)
+            case .metric(.volume): VolumeDetail(model: model)
             case let .metric(kind): metricDetail(kind)
             case .indicators: indicatorDetail
             case nil: EmptyView()
@@ -186,87 +219,73 @@ struct PanelView: View {
     }
 
     @ViewBuilder
-    private func metricDetail(_ kind: MetricKind) -> some View {
-        if kind == .network, showsWiFiControls {
-            WiFiSection(model: model, summary: networkSummary)
+    private var networkDetail: some View {
+        if showsWiFiControls {
+            WiFiSection(model: model)
         } else {
-            section(kind.title) {
-                if kind == .volume {
-                    VolumeControl(model: model)
-                } else {
-                    rows(for: kind)
+            VStack(alignment: .leading, spacing: 0) {
+                MenuTitleRow(title: "网络") { EmptyView() }
+                ForEach(model.reading(.network).rows, id: \.label) { MenuValueRow(label: $0.label, value: $0.value) }
+                if model.network.wifiAssociated {
+                    ssidRow
                 }
-                if let action = action(for: kind) {
-                    Button(action.title, action: action.run)
-                        .buttonStyle(.link)
-                        .font(.system(size: 12))
-                        .padding(.top, 2)
-                }
+                MenuDivider()
+                MenuItem(title: "网络设置…") { model.openSystemSettings(.network) }
             }
-        }
-    }
-
-    /// 网络的一行摘要，放在 Wi-Fi 标题下面。
-    private var networkSummary: String? {
-        let network = model.network
-        var parts: [String] = []
-        if network.link != .wifi { parts.append(network.linkText) }
-        if let signal = network.signalText { parts.append(signal) }
-        if let detail = network.detailText { parts.append(detail) }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    private func action(for kind: MetricKind) -> (title: String, run: () -> Void)? {
-        switch kind {
-        case .battery: ("电池设置…", { model.openSystemSettings(.battery) })
-        case .cpu, .gpu, .memory, .throughput: ("打开活动监视器", { model.openActivityMonitor() })
-        case .disk: ("存储空间…", { model.openSystemSettings(.storage) })
-        case .volume: ("声音设置…", { model.openSystemSettings(.sound) })
-        case .accessory: ("蓝牙设置…", { model.openSystemSettings(.bluetooth) })
-        case .network: ("网络设置…", { model.openSystemSettings(.network) })
         }
     }
 
     @ViewBuilder
-    private func rows(for kind: MetricKind) -> some View {
+    private var ssidRow: some View {
+        if let ssid = model.network.ssid {
+            MenuValueRow(label: "Wi-Fi 名称", value: ssid)
+        } else {
+            MenuItem(title: model.ssidAccess == .denied ? "去开启定位权限，显示 Wi-Fi 名称…" : "显示 Wi-Fi 名称…") {
+                model.requestSSIDAccess()
+            }
+            .help("macOS 只把 Wi-Fi 名称提供给有定位权限的 App，DuoBar 不会读取你的位置。")
+        }
+    }
+
+    private func metricDetail(_ kind: MetricKind) -> some View {
         let reading = model.reading(kind)
-        ForEach(Array(reading.rows.enumerated()), id: \.offset) { index, item in
-            row(item.label, item.value)
-            // 网络的第一行是“连接”，Wi-Fi 名称紧跟其后。
-            if kind == .network, index == 0, model.network.wifiAssociated {
-                ssidRow
+        return VStack(alignment: .leading, spacing: 0) {
+            MenuTitleRow(title: kind.title) {
+                Text(reading.value)
+                    .font(.system(size: 13))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(reading.rows, id: \.label) { MenuValueRow(label: $0.label, value: $0.value) }
+            if let action = action(for: kind) {
+                MenuDivider()
+                MenuItem(title: action.title, action: action.run)
             }
         }
     }
 
-    private var ssidRow: some View {
-        HStack {
-            label("Wi-Fi 名称")
-            Spacer(minLength: 12)
-            if let ssid = model.network.ssid {
-                Text(ssid).font(.system(size: 12))
-            } else {
-                Button(model.ssidAccess == .denied ? "去开启定位权限" : "显示名称") {
-                    model.requestSSIDAccess()
-                }
-                .controlSize(.small)
-                .help("macOS 只把 Wi-Fi 名称提供给有定位权限的 App，DuoBar 不会读取你的位置。")
-            }
+    private func action(for kind: MetricKind) -> (title: String, run: () -> Void)? {
+        switch kind {
+        case .cpu, .gpu, .memory, .throughput: ("活动监视器…", { model.openActivityMonitor() })
+        case .disk: ("存储空间…", { model.openSystemSettings(.storage) })
+        case .accessory: ("蓝牙设置…", { model.openSystemSettings(.bluetooth) })
+        case .battery, .network, .volume: nil
         }
     }
 
     private var indicatorDetail: some View {
-        section("指示灯") {
+        VStack(alignment: .leading, spacing: 0) {
+            MenuTitleRow(title: "指示灯") { EmptyView() }
             ForEach(Array(model.layout.indicators.enumerated()), id: \.offset) { _, kind in
                 if let kind {
-                    HStack(spacing: 8) {
-                        StatusDot(on: model.indicatorStates[kind] == true,
-                                  tint: model.indicatorColors ? kind.tint : nil)
-                        label(kind.title)
-                        Spacer(minLength: 12)
+                    let on = model.indicatorStates[kind] == true
+                    MenuRow(title: kind.title, help: kind.summary) {
+                        IconCircle(active: on, tint: on && model.indicatorColors ? kind.tint?.color : nil) {
+                            IndicatorIcon(kind: kind, size: 12)
+                        }
+                    } trailing: {
                         indicatorControl(kind)
                     }
-                    .frame(minHeight: 20)
                 }
             }
         }
@@ -282,7 +301,7 @@ struct PanelView: View {
                 set: { model.setWiFiPower($0) }
             ))
             .toggleStyle(.switch)
-            .controlSize(.mini)
+            .controlSize(.small)
             .labelsHidden()
             .disabled(model.wifiSwitching)
         case .muted:
@@ -291,39 +310,29 @@ struct PanelView: View {
                 set: { model.setMuted($0) }
             ))
             .toggleStyle(.switch)
-            .controlSize(.mini)
+            .controlSize(.small)
             .labelsHidden()
         case .bluetooth where model.bluetoothAccess == .denied:
-            Button("去开启蓝牙权限") { model.requestBluetoothAccess() }
+            Button("开启权限") { model.requestBluetoothAccess() }
                 .controlSize(.small)
         default:
             Text(model.indicatorText(kind))
                 .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         }
     }
 
-    // MARK: - 更新和底部
+    // MARK: - 更新
 
-    private func updateBanner(_ release: ReleaseInfo) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.down.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(Color.accentColor)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("DuoBar \(release.version) 可以更新")
-                        .font(.system(size: 12, weight: .semibold))
-                    Button("查看更新内容") { model.openReleasePage() }
-                        .buttonStyle(.link)
-                        .font(.system(size: 11))
-                }
-                Spacer(minLength: 8)
-                if let progress = updateProgress {
+    private func updateRow(_ release: ReleaseInfo) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MenuRow(title: "DuoBar \(release.version) 可以更新", subtitle: updateProgress ?? "查看更新内容",
+                    action: updateProgress == nil ? { model.openReleasePage() } : nil) {
+                IconCircle(symbol: "arrow.down", active: true)
+            } trailing: {
+                if updateProgress != nil {
                     ProgressView()
                         .controlSize(.small)
-                    Text(progress)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
                 } else {
                     Button("立即更新") { model.installUpdate() }
                         .controlSize(.small)
@@ -338,10 +347,7 @@ struct PanelView: View {
                 }
             }
             if let message = model.updateMessage {
-                Text(message)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
+                MenuNote(text: message, color: .red)
             }
         }
     }
@@ -353,75 +359,113 @@ struct PanelView: View {
         case .idle, .checking, .upToDate, .available: nil
         }
     }
+}
 
-    private var footer: some View {
-        HStack(spacing: 8) {
-            Button("自定义图标…") { model.openSettings() }
-            // 网络没放在图标上时，Wi-Fi 控制从这里打开。
-            if showsWiFiControls, !model.layout.metricKinds.contains(.network) {
-                Button {
-                    toggle(.wifi)
-                } label: {
-                    Image(systemName: model.network.wifiPowered ? "wifi" : "wifi.slash")
+// MARK: - 电池
+
+/// 和系统电池菜单一样：电量、电源、充电状态、立即充满电、能耗模式、使用大量能耗的 App。
+private struct BatteryDetail: View {
+    let model: AppModel
+
+    var body: some View {
+        let battery = model.battery
+        VStack(alignment: .leading, spacing: 0) {
+            MenuTitleRow(title: battery.hasBattery ? "电池" : "电源") {
+                if battery.hasBattery {
+                    Text("\(battery.percent)%")
+                        .font(.system(size: 13))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.bordered)
-                .tint(tab == .wifi ? Color.accentColor : nil)
-                .help("Wi-Fi")
             }
-            Spacer()
-            Button("退出 DuoBar") { NSApp.terminate(nil) }
+            MenuNote(text: battery.powerSourceText)
+            ForEach(battery.statusLines(limit: model.chargeLimit), id: \.self) { MenuNote(text: $0) }
+            if model.chargeLimit?.canOverride == true, battery.power != .battery {
+                MenuItem(title: model.chargingToFullRequested ? "正在请求充满电…" : "立即充满电",
+                         enabled: !model.chargingToFullRequested) {
+                    model.chargeToFullNow()
+                }
+                .padding(.top, 2)
+            }
+            if let message = model.chargeMessage {
+                MenuNote(text: message, color: .red)
+            }
+
+            MenuDivider()
+            MenuSectionHeader(title: "能耗模式")
+            MenuRow(title: battery.energyModeText, subtitle: "在电池设置中更改",
+                    help: "macOS 只允许系统自己切换能耗模式",
+                    action: { model.openSystemSettings(.battery) }) {
+                IconCircle(symbol: energySymbol, active: battery.lowPowerMode || battery.highPowerMode,
+                           tint: battery.lowPowerMode ? .yellow : nil)
+            } trailing: {
+                Image(systemName: "arrow.up.forward.app")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            if battery.hasBattery {
+                MenuDivider()
+                MenuSectionHeader(title: "使用大量能耗")
+                energyApps
+            }
+
+            MenuDivider()
+            MenuItem(title: battery.hasBattery ? "电池设置…" : "能耗设置…") {
+                model.openSystemSettings(.battery)
+            }
         }
-        .controlSize(.small)
-        .padding(.top, 12)
     }
 
-    // MARK: - 小部件
-
-    private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-            content()
-        }
+    private var energySymbol: String {
+        if model.battery.highPowerMode { return "gauge.with.dots.needle.100percent" }
+        return model.battery.lowPowerMode ? "gauge.with.dots.needle.0percent" : "gauge.with.dots.needle.50percent"
     }
 
-    private func label(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 12))
-            .foregroundStyle(.secondary)
-    }
-
-    private func row(_ title: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            label(title)
-            Spacer(minLength: 12)
-            Text(value)
-                .font(.system(size: 12))
-                .monospacedDigit()
-                .multilineTextAlignment(.trailing)
+    @ViewBuilder
+    private var energyApps: some View {
+        if let hogs = model.energyHogs {
+            if hogs.isEmpty {
+                MenuNote(text: "没有使用大量能耗的 App")
+            } else {
+                ForEach(hogs) { hog in
+                    MenuRow(title: hog.name, help: "最近平均占用 \(Int(hog.cpu.rounded()))% CPU",
+                            action: { model.activate(hog) }) {
+                        if let icon = NSRunningApplication(processIdentifier: hog.pid)?.icon {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .frame(width: 22, height: 22)
+                        }
+                    }
+                }
+            }
+        } else {
+            MenuNote(text: "正在统计…")
         }
     }
 }
 
-/// 音量滑块和静音按钮。拖动时先用本地的值，松手后再跟随系统读数，避免滑块来回跳。
-private struct VolumeControl: View {
+// MARK: - 声音
+
+/// 音量滑块。拖动时先用本地的值，松手后再跟随系统读数，避免滑块来回跳。
+private struct VolumeDetail: View {
     let model: AppModel
     @State private var dragging: Double?
 
     var body: some View {
         let reading = model.reading(.volume)
         let muted = model.indicatorStates[.muted] == true
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 0) {
+            MenuTitleRow(title: "声音") {
+                Text(muted ? "静音" : "\(Int(((dragging ?? reading.level) * 100).rounded()))%")
+                    .font(.system(size: 13))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
             HStack(spacing: 8) {
-                Button {
-                    model.setMuted(!muted)
-                } label: {
-                    Image(systemName: muted ? "speaker.slash.fill" : "speaker.fill")
-                        .frame(width: 16)
-                }
-                .buttonStyle(.borderless)
-                .help(muted ? "取消静音" : "静音")
+                Image(systemName: "speaker.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
                 Slider(value: Binding(
                     get: { dragging ?? reading.level },
                     set: { value in
@@ -431,28 +475,42 @@ private struct VolumeControl: View {
                 ), in: 0 ... 1) { editing in
                     if !editing { dragging = nil }
                 }
-                Text(muted ? "静音" : "\(Int(((dragging ?? reading.level) * 100).rounded()))%")
-                    .font(.system(size: 12))
-                    .monospacedDigit()
-                    .frame(width: 36, alignment: .trailing)
-            }
-            if let device = reading.rows.first(where: { $0.label == "输出设备" })?.value {
-                Text(device)
+                .controlSize(.small)
+                Image(systemName: "speaker.wave.3.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
+            .padding(.horizontal, MenuMetrics.inset)
+            .padding(.vertical, 4)
+            if let device = reading.rows.first(where: { $0.label == "输出设备" })?.value {
+                MenuSectionHeader(title: "输出")
+                MenuRow(title: device) {
+                    IconCircle(symbol: "hifispeaker.fill", active: true)
+                }
+            }
+            MenuDivider()
+            MenuItem(title: "声音设置…") { model.openSystemSettings(.sound) }
         }
     }
 }
 
-/// 指示灯当前是否亮起的小圆点。
-struct StatusDot: View {
-    let on: Bool
-    let tint: DuoTint?
+/// 拆分动画里的一个胶囊：跟着进度从第一个胶囊的位置滑到自己的位置。
+/// 每一帧都拿到实际的进度，所以文字和圆底可以等胶囊快分开了再出现，不会和上面的胶囊叠在一起。
+private struct SplitSlide<Content: View>: View, Animatable {
+    var progress: CGFloat
+    var index: Int
+    /// 相邻两个胶囊的距离。
+    var step: CGFloat
+    @ViewBuilder var content: (_ reveal: Double, _ progress: CGFloat) -> Content
+
+    nonisolated var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
 
     var body: some View {
-        Circle()
-            .fill(on ? (tint?.color ?? Color.primary) : Color.secondary.opacity(0.3))
-            .frame(width: 7, height: 7)
+        content(index == 0 ? 1 : Double(smoothstep(0.45, 0.95, progress)), progress)
+            // 拆分前所有胶囊都叠在第一个的位置。
+            .offset(y: -CGFloat(index) * step * (1 - progress))
     }
 }

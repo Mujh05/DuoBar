@@ -113,6 +113,7 @@ enum PreviewRenderer {
         write(percentTransitionSheet(), to: directory.appendingPathComponent("percent-transition.png"))
         write(scaleSheet(), to: directory.appendingPathComponent("scales.png"))
         render(splitSheet(), to: directory.appendingPathComponent("split.png"))
+        render(tileSplitSheet(), to: directory.appendingPathComponent("tile-split.png"))
 
         // 面板用本机的真实数据，等网络状态回调先到。
         let model = AppModel()
@@ -123,6 +124,39 @@ enum PreviewRenderer {
     }
 
     // MARK: - 拆分动画逐帧
+
+    /// 面板胶囊里的图案从合体到拆开，几种布局各一行，进度 0、0.25、0.5、0.75、1。
+    static func tileSplitSheet() -> some View {
+        let frames: [CGFloat] = [0, 0.25, 0.5, 0.75, 1]
+        let rows = [samples[1], samples[3], samples[5], samples[6], samples[8], samples[9]]
+        return VStack(alignment: .leading, spacing: 18) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, sample in
+                HStack(alignment: .top, spacing: 16) {
+                    Text(sample.0)
+                        .font(.system(size: 12))
+                        .frame(width: 150, alignment: .leading)
+                    ForEach(frames, id: \.self) { progress in
+                        ZStack(alignment: .top) {
+                            ForEach(Slot.allCases) { slot in
+                                ZStack {
+                                    Circle()
+                                        .fill(.white)
+                                        .opacity(slot == .ring ? 1 : Double(smoothstep(0.45, 0.95, progress)))
+                                    DuoPartGlyph(slot: slot, state: sample.1, progress: progress,
+                                                 color: .fixedLight(.accentColor), onWhite: true)
+                                }
+                                .frame(width: 36, height: 36)
+                                .offset(y: CGFloat(slot.rawValue) * 44 * progress)
+                            }
+                        }
+                        .frame(width: 44, height: 36 + 88, alignment: .top)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(Color(white: 0.85))
+    }
 
     static func splitSheet() -> some View {
         let frames: [CGFloat] = [0, 0.2, 0.4, 0.6, 0.8, 1]
@@ -157,7 +191,7 @@ enum PreviewRenderer {
     static func panelSheet(_ model: AppModel) -> some View {
         HStack(alignment: .top, spacing: 20) {
             ForEach([false, true], id: \.self) { dark in
-                PanelView(model: model, previewSplit: true)
+                PanelView(model: model)
                     .background(RoundedRectangle(cornerRadius: 12).fill(dark ? Color(white: 0.17) : Color(white: 0.97)))
                     .environment(\.colorScheme, dark ? .dark : .light)
             }

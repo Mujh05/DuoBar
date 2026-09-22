@@ -325,7 +325,7 @@ struct GeneralSettingsPage: View {
         Section("面板") {
             Toggle(isOn: $model.showWiFiControls) {
                 Text("显示 Wi-Fi 开关和附近的网络")
-                Text("网络放在图标上时，点面板里的网络图标展开；否则从面板底部的 Wi-Fi 按钮打开。")
+                Text("网络放在图标上时，点面板里的 Wi-Fi 展开；没放时面板里会单独多一个 Wi-Fi。")
             }
         }
 
