@@ -19,6 +19,8 @@ struct PanelView: View {
     var previewSplit: CGFloat?
     @State private var selectedTab: PanelTab?
     @State private var split = false
+    /// 收着时稍微缩小：打开时从菜单栏方向放大出来，收起时再缩回去。
+    @State private var shrunk = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var tab: PanelTab? { previewTab ?? selectedTab }
@@ -65,14 +67,11 @@ struct PanelView: View {
         .padding(.top, Self.floating ? MenuPanelController.floatingTopInset : 0)
         .padding(.bottom, Self.floating ? MenuPanelController.floatingInset : 10)
         .frame(width: MenuMetrics.width, alignment: .top)
+        .scaleEffect(animates && shrunk && !reduceMotion ? 0.95 : 1, anchor: .top)
         .onChange(of: model.panelVisible, initial: true) { _, visible in
-            guard previewTab == nil, previewSplit == nil else { return }
+            guard animates else { return }
             if visible {
-                if reduceMotion {
-                    split = true
-                } else {
-                    withAnimation(.spring(duration: 0.65, bounce: 0.2).delay(0.05)) { split = true }
-                }
+                appear()
             } else {
                 // 下次打开时重新从合体开始，也回到只有胶囊的样子。
                 var transaction = Transaction()
@@ -80,7 +79,17 @@ struct PanelView: View {
                 withTransaction(transaction) {
                     selectedTab = nil
                     split = false
+                    shrunk = true
                 }
+            }
+        }
+        .onChange(of: model.panelClosing) { _, closing in
+            guard animates else { return }
+            if closing {
+                disappear()
+            } else if model.panelVisible {
+                // 收起动画还没播完又被打开。
+                appear()
             }
         }
         .onChange(of: showsBatteryDetail, initial: true) { _, visible in
@@ -95,6 +104,30 @@ struct PanelView: View {
     private var showsBatteryDetail: Bool {
         guard case let .slot(slot) = tab else { return false }
         return model.layout[slot] == .metric(.battery)
+    }
+
+    /// 预览（设置窗口里、开发截图）固定样子，不播放打开和收起的动画。
+    private var animates: Bool { previewTab == nil && previewSplit == nil }
+
+    /// 打开：胶囊从一个拆成几个，整个面板从菜单栏方向放大出来。
+    private func appear() {
+        guard !reduceMotion else {
+            split = true
+            shrunk = false
+            return
+        }
+        withAnimation(.spring(duration: 0.65, bounce: 0.2).delay(0.05)) { split = true }
+        withAnimation(.spring(duration: 0.35, bounce: 0.15)) { shrunk = false }
+    }
+
+    /// 收起：和打开反过来，胶囊合回一个（展开了详情时那个胶囊滑回顶部），整个面板缩回菜单栏方向，
+    /// 窗口同时淡出（见 MenuPanelController.close）。
+    private func disappear() {
+        guard !reduceMotion else { return }
+        withAnimation(.smooth(duration: MenuPanelController.closeDuration)) {
+            split = false
+            shrunk = true
+        }
     }
 
     private func toggle(_ target: PanelTab) {

@@ -200,6 +200,9 @@ final class AppModel {
         }
     }
 
+    /// 面板正在播放收起的动画（胶囊合拢、缩小淡出），之后 panelVisible 才变成 false。
+    var panelClosing = false
+
     /// 面板是否打开。打开时网络信息刷新得更勤。
     var panelVisible = false {
         didSet {

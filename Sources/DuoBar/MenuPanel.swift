@@ -1,4 +1,5 @@
 import AppKit
+import os
 import SwiftUI
 
 /// 像系统菜单栏菜单（Wi-Fi、电池）一样的面板：没有箭头，贴着菜单栏出现在图标下面，
@@ -7,7 +8,12 @@ import SwiftUI
 @MainActor
 final class MenuPanelController: NSObject, NSWindowDelegate {
     var onShow: (() -> Void)?
+    /// 开始收起：面板内容在这段时间里播放收起的动画。
+    var onWillClose: (() -> Void)?
     var onClose: (() -> Void)?
+
+    /// 收起动画的时长，和 PanelView 里合拢胶囊的动画一致。
+    static let closeDuration: TimeInterval = 0.3
 
     private let panel = MenuPanel(contentRect: NSRect(x: 0, y: 0, width: MenuMetrics.width, height: 100),
                                   styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -22,6 +28,10 @@ final class MenuPanelController: NSObject, NSWindowDelegate {
     static let cornerRadius: CGFloat = 18
 
     var isShown: Bool { panel.isVisible && !closing }
+    /// 最近一次开始收起面板的时间（开机以来的秒数，和 NSEvent.timestamp 同一个时间基准）。
+    private var lastCloseTime: TimeInterval = 0
+
+    static let log = Logger(subsystem: "com.mujh.DuoBar", category: "panel")
     /// 开发用：面板内容，用来截图。
     var contentView: NSView { host }
     /// 开发用：面板在屏幕上的位置。
@@ -45,32 +55,43 @@ final class MenuPanelController: NSObject, NSWindowDelegate {
         panel.animationBehavior = .none
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.delegate = self
-        panel.onCancel = { [weak self] in self?.close() }
+        panel.onCancel = { [weak self] in self?.close(reason: "按了 Esc") }
         panel.contentView = Self.background(containing: host)
     }
 
     func show(below button: NSStatusBarButton) {
+        Self.log.notice("打开面板")
         anchor = button
         panel.appearance = fixedAppearance ?? Self.menuBarAppearance(of: button)
+        // 收起动画还没播完又被打开：从当前的样子直接恢复，不再从透明开始。
+        let reopening = closing && panel.isVisible
         closing = false
         onShow?()
         host.layoutSubtreeIfNeeded()
-        panel.setFrame(frame(for: host.fittingSize), display: false)
-        panel.alphaValue = 0
+        if !reopening {
+            panel.setFrame(frame(for: host.fittingSize), display: false)
+            panel.alphaValue = 0
+        }
         panel.makeKeyAndOrderFront(nil)
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
+            context.duration = reopening ? 0.2 : 0.12
             panel.animator().alphaValue = 1
         }
         installMonitors()
     }
 
-    func close() {
+    func close(reason: String = "其他") {
         guard panel.isVisible, !closing else { return }
+        Self.log.notice("收起面板：\(reason, privacy: .public)")
+        lastCloseTime = ProcessInfo.processInfo.systemUptime
         closing = true
         removeMonitors()
+        onWillClose?()
+        // 胶囊合拢、面板缩小的同时淡出；淡出先慢后快，合拢的过程看得见。
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.1
+            context.duration = reduceMotion ? 0.12 : Self.closeDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             panel.animator().alphaValue = 0
         } completionHandler: { [weak self] in
             MainActor.assumeIsolated {
@@ -174,18 +195,33 @@ final class MenuPanelController: NSObject, NSWindowDelegate {
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.close() }
+            MainActor.assumeIsolated {
+                guard let self, !self.isOnAnchor(NSEvent.mouseLocation) else { return }
+                self.close(reason: "点了面板外面")
+            }
         }
         // DuoBar 自己的其他窗口，比如设置窗口。点菜单栏图标由图标自己的动作来开关。
         localClickMonitor = NSEvent.addLocalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] event in
             MainActor.assumeIsolated {
-                guard let self, event.window !== self.panel, event.window !== self.anchor?.window else { return }
-                self.close()
+                guard let self, event.window !== self.panel, !self.isOnAnchor(NSEvent.mouseLocation) else { return }
+                self.close(reason: "点了 DuoBar 的其他窗口")
             }
             return event
         }
+    }
+
+    /// 点在菜单栏图标上：开关交给图标自己的动作，自动收起的逻辑不管。
+    private func isOnAnchor(_ screenPoint: NSPoint) -> Bool {
+        guard let button = anchor, let window = button.window else { return false }
+        return window.convertToScreen(button.convert(button.bounds, to: nil)).contains(screenPoint)
+    }
+
+    /// 这一下点击是否已经让面板收起了，比如按下时面板先失去了焦点；这时图标的动作就不要再把它打开。
+    func wasClosed(by event: NSEvent?) -> Bool {
+        guard let event else { return false }
+        return lastCloseTime >= event.timestamp - 0.05
     }
 
     private func removeMonitors() {
@@ -198,7 +234,9 @@ final class MenuPanelController: NSObject, NSWindowDelegate {
 
     /// 用 ⌘Tab 切到别的 App 等情况下，面板不再是键盘焦点，这时收起。
     func windowDidResignKey(_ notification: Notification) {
-        close()
+        // 按下菜单栏图标时面板也会失去焦点，这时由图标的动作来开关，不然会先收起再被重新打开。
+        if NSEvent.pressedMouseButtons != 0, isOnAnchor(NSEvent.mouseLocation) { return }
+        close(reason: "失去焦点")
     }
 }
 
