@@ -19,6 +19,8 @@ struct PanelView: View {
     var previewSplit: CGFloat?
     @State private var selectedTab: PanelTab?
     @State private var split = false
+    /// 收着时稍微缩小：打开时从菜单栏方向放大出来，收起时再缩回去。
+    @State private var shrunk = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var tab: PanelTab? { previewTab ?? selectedTab }
@@ -29,43 +31,47 @@ struct PanelView: View {
         return split ? 1 : 0
     }
 
+    private static var floating: Bool { MenuPanelController.floatingGlass }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: Self.floating ? 8 : 0) {
             PanelTiles(model: model, progress: splitProgress, selected: tab, onSelect: toggle)
-                .padding(.horizontal, 10)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
+                .padding(.horizontal, Self.floating ? 0 : 10)
+                .padding(.top, Self.floating ? 0 : 10)
+                .padding(.bottom, Self.floating ? 0 : 4)
 
             if let tab {
                 detail(tab)
-                    .padding(.top, 4)
+                    .panelCard()
+                    .padding(.top, Self.floating ? 0 : 4)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
             if let release = model.availableUpdate {
-                MenuDivider()
+                if !Self.floating { MenuDivider() }
                 updateRow(release)
+                    .panelCard()
             }
-            // 展开了详情时和上面隔一条线；只有胶囊时直接接在下面。
-            if tab != nil || model.availableUpdate != nil {
+            // 只有一整块底板时，按钮和上面的内容之间隔一条线；每块各自是玻璃时靠间距分开。
+            if !Self.floating, tab != nil || model.availableUpdate != nil {
                 MenuDivider()
             }
             HStack(spacing: 8) {
                 CapsuleButton(title: "设置", symbol: "gearshape", help: "打开 DuoBar 设置") { model.openSettings() }
                 CapsuleButton(title: "退出", symbol: "power", help: "退出 DuoBar") { NSApp.terminate(nil) }
             }
-            .padding(.horizontal, 10)
-            .padding(.top, 4)
+            .padding(.horizontal, Self.floating ? 0 : 10)
+            .padding(.top, Self.floating ? 0 : 4)
         }
-        .padding(.bottom, 10)
+        // 每块玻璃四周留出阴影和高光的位置。
+        .padding(.horizontal, Self.floating ? MenuPanelController.floatingInset : 0)
+        .padding(.top, Self.floating ? MenuPanelController.floatingTopInset : 0)
+        .padding(.bottom, Self.floating ? MenuPanelController.floatingInset : 10)
         .frame(width: MenuMetrics.width, alignment: .top)
+        .scaleEffect(animates && shrunk && !reduceMotion ? 0.95 : 1, anchor: .top)
         .onChange(of: model.panelVisible, initial: true) { _, visible in
-            guard previewTab == nil, previewSplit == nil else { return }
+            guard animates else { return }
             if visible {
-                if reduceMotion {
-                    split = true
-                } else {
-                    withAnimation(.spring(duration: 0.65, bounce: 0.2).delay(0.05)) { split = true }
-                }
+                appear()
             } else {
                 // 下次打开时重新从合体开始，也回到只有胶囊的样子。
                 var transaction = Transaction()
@@ -73,7 +79,17 @@ struct PanelView: View {
                 withTransaction(transaction) {
                     selectedTab = nil
                     split = false
+                    shrunk = true
                 }
+            }
+        }
+        .onChange(of: model.panelClosing) { _, closing in
+            guard animates else { return }
+            if closing {
+                disappear()
+            } else if model.panelVisible {
+                // 收起动画还没播完又被打开。
+                appear()
             }
         }
         .onChange(of: showsBatteryDetail, initial: true) { _, visible in
@@ -88,6 +104,30 @@ struct PanelView: View {
     private var showsBatteryDetail: Bool {
         guard case let .slot(slot) = tab else { return false }
         return model.layout[slot] == .metric(.battery)
+    }
+
+    /// 预览（设置窗口里、开发截图）固定样子，不播放打开和收起的动画。
+    private var animates: Bool { previewTab == nil && previewSplit == nil }
+
+    /// 打开：胶囊从一个拆成几个，整个面板从菜单栏方向放大出来。
+    private func appear() {
+        guard !reduceMotion else {
+            split = true
+            shrunk = false
+            return
+        }
+        withAnimation(.spring(duration: 0.65, bounce: 0.2).delay(0.05)) { split = true }
+        withAnimation(.spring(duration: 0.35, bounce: 0.15)) { shrunk = false }
+    }
+
+    /// 收起：和打开反过来，胶囊合回一个（展开了详情时那个胶囊滑回顶部），整个面板缩回菜单栏方向，
+    /// 窗口同时淡出（见 MenuPanelController.close）。
+    private func disappear() {
+        guard !reduceMotion else { return }
+        withAnimation(.smooth(duration: MenuPanelController.closeDuration)) {
+            split = false
+            shrunk = true
+        }
     }
 
     private func toggle(_ target: PanelTab) {
@@ -311,8 +351,9 @@ private struct BatteryDetail: View {
                 }
             }
             MenuNote(text: battery.powerSourceText)
-            ForEach(battery.statusLines(limit: model.chargeLimit), id: \.self) { MenuNote(text: $0) }
-            if model.chargeLimit?.canOverride == true, battery.power != .battery {
+            ForEach(battery.statusLines(limit: model.chargeLimit, starting: model.chargeStarting,
+                                        pausedLimit: model.pausedChargeLimit), id: \.self) { MenuNote(text: $0) }
+            if model.chargeLimit?.canOverride == true, battery.power != .battery, !model.chargeStarting {
                 MenuItem(title: model.chargingToFullRequested ? "正在请求充满电…" : "立即充满电",
                          enabled: !model.chargingToFullRequested) {
                     model.chargeToFullNow()
@@ -422,6 +463,20 @@ private struct VolumeDetail: View {
             }
             MenuDivider()
             MenuItem(title: "声音设置…") { model.openSystemSettings(.sound) }
+        }
+    }
+}
+
+extension View {
+    /// macOS 26 起，面板里展开的详情和更新提示各自是一块玻璃，和控制中心展开的模块一样；
+    /// 更早的系统上整个面板是一块毛玻璃，这里不加背景。
+    @ViewBuilder
+    func panelCard() -> some View {
+        if #available(macOS 26, *) {
+            padding(.vertical, 8)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        } else {
+            self
         }
     }
 }

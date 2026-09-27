@@ -28,9 +28,18 @@ rm -rf "$ICONSET"
 "$BIN" --render-app-icon "$ICONSET"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
-# 本机自用，ad-hoc 签名即可。
-codesign --force --sign - "$APP"
-echo "已生成 $APP"
+# 签名：钥匙串里有“DuoBar Code Signing”证书时用它签，否则 ad-hoc。
+# 用同一张证书签的每个版本，系统看到的签名特征都一样（identifier + 证书），
+# 更新后定位、蓝牙等权限不会丢；ad-hoc 签名的特征是程序的哈希，每次构建都变。
+# DUOBAR_SIGN_IDENTITY 可以指定别的证书，设成 - 就用 ad-hoc。
+IDENTITY="${DUOBAR_SIGN_IDENTITY:-}"
+if [[ -z "$IDENTITY" ]]; then
+  IDENTITY=$(security find-certificate -c "DuoBar Code Signing" -Z 2>/dev/null | awk '/SHA-1/ { print $3; exit }')
+fi
+codesign --force --sign "${IDENTITY:--}" "$APP"
+# awk 读完整个输出再结束：提前退出会让 codesign 收到 SIGPIPE，在 pipefail 下整条管道算失败。
+SIGNER=$(codesign -dv --verbose=2 "$APP" 2>&1 | awk -F= '/^Authority=/ && !found { print $2; found = 1 }')
+echo "已生成 $APP（签名：${SIGNER:-ad-hoc}）"
 
 if [[ "${1:-}" == "--install" ]]; then
   pkill -x DuoBar 2>/dev/null || true

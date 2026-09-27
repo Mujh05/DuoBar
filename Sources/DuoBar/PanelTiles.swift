@@ -118,7 +118,7 @@ struct PanelTiles: View {
         let battery = model.battery
         let tint: Color? = if battery.lowPowerMode { .yellow } else if battery.power != .battery { .green }
             else if battery.isLow { .red } else { nil }
-        return TileInfo(title: battery.hasBattery ? "电池" : "电源", subtitle: battery.summary(limit: model.chargeLimit),
+        return TileInfo(title: battery.hasBattery ? "电池" : "电源", subtitle: battery.summary(limit: model.chargeLimit, starting: model.chargeStarting),
                         active: battery.power != .battery, tint: tint)
     }
 

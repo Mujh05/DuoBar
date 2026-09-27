@@ -20,13 +20,15 @@ extension BatteryInfo {
     }
 
     /// 面板里电池那一格的小字，和系统电池菜单的标题一样，比如“84%，正在充电”。
-    func summary(limit: ChargeLimitState?) -> String {
+    /// - Parameter starting: 刚点了“立即充满电”，系统还没真正开始充电。
+    func summary(limit: ChargeLimitState?, starting: Bool = false) -> String {
         guard hasBattery else { return "电源适配器" }
         switch power {
         case .battery: return "\(percent)%"
         case .charging: return "\(percent)%，正在充电"
         case .pluggedIn:
             if isCharged || percent >= 100 { return "\(percent)%，已充满电" }
+            if starting { return "\(percent)%，即将开始充电" }
             return limit?.source != nil ? "\(percent)%，暂停充电" : "\(percent)%，已连接电源"
         }
     }
@@ -36,9 +38,19 @@ extension BatteryInfo {
     }
 
     /// 电池菜单标题下面的说明，说法和系统电池菜单一致。
-    func statusLines(limit: ChargeLimitState?) -> [String] {
+    /// - Parameters:
+    ///   - starting: 刚点了“立即充满电”，系统还没真正开始充电。
+    ///   - pausedLimit: 被“立即充满电”暂停了的手动上限。
+    func statusLines(limit: ChargeLimitState?, starting: Bool = false,
+                     pausedLimit: PausedChargeLimit? = nil) -> [String] {
         guard hasBattery else { return [] }
         var lines: [String] = []
+        if starting, power == .pluggedIn, !isCharged, percent < 100 {
+            lines.append("即将开始充电…")
+            lines.append("系统通常需要一两分钟才开始充电")
+            if let pausedLimit { lines.append(Self.pausedText(pausedLimit)) }
+            return lines
+        }
         switch power {
         case .battery:
             lines.append(minutesToEmpty.map { "约可使用 \(Self.duration($0))" } ?? "正在估算剩余时间…")
@@ -63,9 +75,17 @@ extension BatteryInfo {
                 lines.append("电池没有在充电")
             }
         }
+        if let pausedLimit, power != .battery, !isCharged { lines.append(Self.pausedText(pausedLimit)) }
         if slowCharger, power != .battery { lines.append("慢充") }
         if serviceRecommended { lines.append("建议维修") }
         return lines
+    }
+
+    /// “80% 上限已暂停，明天 06:00 恢复”
+    private static func pausedText(_ paused: PausedChargeLimit) -> String {
+        let time = paused.until.formatted(date: .omitted, time: .shortened)
+        let day = Calendar.current.isDateInTomorrow(paused.until) ? "明天 " : ""
+        return "\(paused.limit)% 上限已暂停，\(day)\(time) 自动恢复"
     }
 
     /// 能耗模式：自动、低电量或高电量。

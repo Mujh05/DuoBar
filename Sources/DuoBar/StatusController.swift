@@ -23,37 +23,21 @@ final class StatusController: NSObject {
         panel = MenuPanelController(rootView: PanelView(model: model))
         super.init()
 
-        panel.onShow = { [weak model] in model?.panelVisible = true }
+        panel.onShow = { [weak model] in
+            model?.panelClosing = false
+            model?.panelVisible = true
+        }
+        panel.onWillClose = { [weak model] in model?.panelClosing = true }
         panel.onClose = { [weak model] in model?.panelVisible = false }
         model.onIconChange = { [weak self] in self?.updateButton() }
         model.onOpenSettings = { [weak self] in
             self?.panel.close()
             self?.settings.show()
         }
-        model.askPassword = { [weak self] ssid in
-            self?.promptPassword(for: ssid)
-        }
         model.onClosePanel = { [weak self] in
             self?.panel.close()
         }
         configureButton()
-    }
-
-    /// 用系统的对话框问 Wi-Fi 密码。密码直接交给 CoreWLAN，DuoBar 不保存。
-    private func promptPassword(for ssid: String) -> String? {
-        panel.close()
-        let alert = NSAlert()
-        alert.messageText = "输入“\(ssid)”的密码"
-        alert.informativeText = "密码会直接交给系统用来加入这个网络，DuoBar 本身不会保存。"
-        alert.addButton(withTitle: "加入")
-        alert.addButton(withTitle: "取消")
-        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.placeholderString = "密码"
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        NSApp.activate()
-        guard alert.runModal() == .alertFirstButtonReturn, !field.stringValue.isEmpty else { return nil }
-        return field.stringValue
     }
 
     private static func makeStatusItem() -> NSStatusItem {
@@ -66,7 +50,8 @@ final class StatusController: NSObject {
         guard let button = statusItem.button else { return }
         button.target = self
         button.action = #selector(togglePanel(_:))
-        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        // 和控制中心一样，按下就开关面板。
+        button.sendAction(on: [.leftMouseDown, .rightMouseDown])
         button.font = .monospacedDigitSystemFont(ofSize: NSFont.menuBarFont(ofSize: 0).pointSize, weight: .regular)
         button.imagePosition = .imageOnly
         percentAnimationTask?.cancel()
@@ -158,9 +143,13 @@ final class StatusController: NSObject {
         return value / end
     }
 
+    /// 点菜单栏图标：面板开着就收起，收着就打开，和控制中心一样。
     @objc private func togglePanel(_ sender: NSStatusBarButton) {
         if panel.isShown {
-            panel.close()
+            panel.close(reason: "再点菜单栏图标")
+        } else if panel.wasClosed(by: NSApp.currentEvent) {
+            // 这一下按下已经让面板收起了（比如先失去了焦点），不要再打开。
+            MenuPanelController.log.notice("这次点击已经收起了面板，不再打开")
         } else {
             panel.show(below: sender)
         }
@@ -190,9 +179,17 @@ final class StatusController: NSObject {
         let split = ProcessInfo.processInfo.environment["DUOBAR_DEBUG_SPLIT"].flatMap(Double.init).map { CGFloat($0) }
         let preview = MenuPanelController(rootView: PanelView(model: model, previewTab: tab, previewSplit: split),
                                           appearance: appearance)
-        preview.onShow = { [weak model] in model?.panelVisible = true }
+        preview.onShow = { [weak model] in
+            model?.panelClosing = false
+            model?.panelVisible = true
+        }
+        preview.onWillClose = { [weak model] in model?.panelClosing = true }
         preview.onClose = { [weak model] in model?.panelVisible = false }
+        if let ssid = ProcessInfo.processInfo.environment["DUOBAR_DEBUG_PASSWORD_PROMPT"] {
+            model.debugShowPasswordPrompt(for: ssid, hint: ProcessInfo.processInfo.environment["DUOBAR_DEBUG_PASSWORD_HINT"])
+        }
         preview.show(below: button)
+        print("menu bar appearance:", button.effectiveAppearance.name.rawValue)
         // 等采样、扫描和面板的淡入完成；DUOBAR_DEBUG_WAIT 可以改等待的秒数。
         let wait = ProcessInfo.processInfo.environment["DUOBAR_DEBUG_WAIT"].flatMap(Double.init) ?? 1.5
         try? await Task.sleep(for: .seconds(wait))
@@ -202,8 +199,10 @@ final class StatusController: NSObject {
                      frame.minX, screenTop - frame.maxY, frame.width, frame.height))
         fflush(stdout)
         try? await Task.sleep(for: .seconds(seconds))
+        print("closing panel")
+        fflush(stdout)
         preview.close()
-        try? await Task.sleep(for: .seconds(0.3))
+        try? await Task.sleep(for: .seconds(0.6))
     }
 
     /// 开发用：把菜单栏按钮和打开过程中的面板截成 PNG，不需要屏幕录制权限。
