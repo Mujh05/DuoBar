@@ -30,30 +30,10 @@ final class StatusController: NSObject {
             self?.panel.close()
             self?.settings.show()
         }
-        model.askPassword = { [weak self] ssid in
-            self?.promptPassword(for: ssid)
-        }
         model.onClosePanel = { [weak self] in
             self?.panel.close()
         }
         configureButton()
-    }
-
-    /// 用系统的对话框问 Wi-Fi 密码。密码直接交给 CoreWLAN，DuoBar 不保存。
-    private func promptPassword(for ssid: String) -> String? {
-        panel.close()
-        let alert = NSAlert()
-        alert.messageText = "输入“\(ssid)”的密码"
-        alert.informativeText = "密码会直接交给系统用来加入这个网络，DuoBar 本身不会保存。"
-        alert.addButton(withTitle: "加入")
-        alert.addButton(withTitle: "取消")
-        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.placeholderString = "密码"
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        NSApp.activate()
-        guard alert.runModal() == .alertFirstButtonReturn, !field.stringValue.isEmpty else { return nil }
-        return field.stringValue
     }
 
     private static func makeStatusItem() -> NSStatusItem {
@@ -192,7 +172,11 @@ final class StatusController: NSObject {
                                           appearance: appearance)
         preview.onShow = { [weak model] in model?.panelVisible = true }
         preview.onClose = { [weak model] in model?.panelVisible = false }
+        if let ssid = ProcessInfo.processInfo.environment["DUOBAR_DEBUG_PASSWORD_PROMPT"] {
+            model.debugShowPasswordPrompt(for: ssid, hint: ProcessInfo.processInfo.environment["DUOBAR_DEBUG_PASSWORD_HINT"])
+        }
         preview.show(below: button)
+        print("menu bar appearance:", button.effectiveAppearance.name.rawValue)
         // 等采样、扫描和面板的淡入完成；DUOBAR_DEBUG_WAIT 可以改等待的秒数。
         let wait = ProcessInfo.processInfo.environment["DUOBAR_DEBUG_WAIT"].flatMap(Double.init) ?? 1.5
         try? await Task.sleep(for: .seconds(wait))

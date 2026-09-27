@@ -21,6 +21,19 @@ struct ChargeLimitState: Sendable, Equatable {
     var deadline: Date?
 }
 
+/// 用“立即充满电”暂停了的手动充电上限。
+struct PausedChargeLimit: Sendable, Equatable {
+    var limit: Int
+    /// 系统恢复上限的时间：实测是暂停后的下一个早上 6 点（系统日志：MCL has been temp disabled until …06:00）。
+    var until: Date
+
+    static func pausing(_ limit: Int, at now: Date = Date()) -> PausedChargeLimit {
+        let sixAM = Calendar.current.nextDate(after: now, matching: DateComponents(hour: 6, minute: 0),
+                                              matchingPolicy: .nextTime) ?? now.addingTimeInterval(12 * 3600)
+        return PausedChargeLimit(limit: limit, until: sixAM)
+    }
+}
+
 /// 读取充电上限，以及执行“立即充满电”。
 ///
 /// 用的是控制中心同款的私有接口（PowerUI 框架里的 PowerUISmartChargeClient），

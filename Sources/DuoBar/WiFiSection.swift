@@ -103,26 +103,34 @@ struct WiFiSection: View {
     }
 
     private func row(_ network: WiFiNetwork, connected: Bool) -> some View {
-        let joining = model.joiningSSID == network.ssid
+        let asking = model.passwordPromptSSID == network.ssid
+        let joining = model.joiningSSID == network.ssid && !asking
         let busy = model.joiningSSID != nil
-        return MenuRow(
-            title: network.ssid,
-            subtitle: connected ? currentDetail : nil,
-            help: helpText(network, connected: connected),
-            action: connected || busy ? nil : { model.join(network) }
-        ) {
-            IconCircle(symbol: "wifi", variable: Double(max(network.level, 1)) / 4, active: connected)
-        } trailing: {
-            if joining {
-                ProgressView()
-                    .controlSize(.mini)
+        return VStack(spacing: 0) {
+            MenuRow(
+                title: network.ssid,
+                subtitle: connected ? currentDetail : nil,
+                help: helpText(network, connected: connected),
+                action: connected || busy ? nil : { model.join(network) }
+            ) {
+                IconCircle(symbol: "wifi", variable: Double(max(network.level, 1)) / 4, active: connected)
+            } trailing: {
+                if joining {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+                if network.secure {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
             }
-            if network.secure {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+            if asking {
+                PasswordEntry(model: model)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .animation(.snappy(duration: 0.25), value: asking)
     }
 
     /// 已连接网络下面的小字：信号和频段。
@@ -136,5 +144,51 @@ struct WiFiSection: View {
         if connected { return "已连接" }
         if network.enterprise { return "企业网络需要在系统设置里用账号加入" }
         return network.known ? "切换到这个网络" : "加入这个网络"
+    }
+}
+
+/// 第一次加入加密网络时，在这个网络下面直接输入密码：回车加入，Esc 取消。
+/// macOS 不让 App 读取系统保存的 Wi-Fi 密码，所以每个网络需要在 DuoBar 里输一次。
+private struct PasswordEntry: View {
+    let model: AppModel
+    @State private var password = ""
+    @State private var remember = true
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let hint = model.passwordPromptHint {
+                Text(hint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+            }
+            SecureField("密码", text: $password)
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .onSubmit(submit)
+                .onExitCommand { model.cancelPassword() }
+                .help("macOS 不让 App 读取系统保存的 Wi-Fi 密码，所以第一次加入需要在这里输入。")
+            HStack(spacing: 8) {
+                Toggle("记住密码", isOn: $remember)
+                    .toggleStyle(.checkbox)
+                    .help("密码存进你的钥匙串，下次加入这个网络就不用再输；可以在设置的“通用”里清除。")
+                Spacer(minLength: 4)
+                Button("取消") { model.cancelPassword() }
+                Button("加入", action: submit)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(password.isEmpty)
+            }
+            .controlSize(.small)
+        }
+        .padding(.leading, MenuMetrics.inset + 35)
+        .padding(.trailing, MenuMetrics.inset)
+        .padding(.top, 2)
+        .padding(.bottom, 8)
+        .onAppear { focused = true }
+    }
+
+    private func submit() {
+        guard !password.isEmpty else { return }
+        model.submitPassword(password, remember: remember)
     }
 }

@@ -318,6 +318,7 @@ struct UpdatesSettingsPage: View {
 struct GeneralSettingsPage: View {
     @Bindable var model: AppModel
 
+    private static let author = URL(string: "https://github.com/Mujh05")!
     private static let homepage = URL(string: "https://github.com/\(UpdateChecker.repository)")!
     private static let issues = URL(string: "https://github.com/\(UpdateChecker.repository)/issues")!
 
@@ -326,6 +327,20 @@ struct GeneralSettingsPage: View {
             Toggle(isOn: $model.showWiFiControls) {
                 Text("显示 Wi-Fi 开关和附近的网络")
                 Text("网络放在图标上时，点面板里的 Wi-Fi 展开；没放时面板里会单独多一个 Wi-Fi。")
+            }
+        }
+
+        if !model.rememberedWiFi.isEmpty {
+            Section {
+                LabeledContent("已记住密码的网络") {
+                    Text("\(model.rememberedWiFi.count) 个")
+                }
+                Button("忘记全部") { model.forgetWiFiPasswords() }
+            } header: {
+                Text("Wi-Fi 密码")
+            } footer: {
+                SectionNote("macOS 不让 App 读取系统保存的 Wi-Fi 密码，所以第一次加入加密网络时 DuoBar 会问一次。"
+                            + "勾选“记住密码”后，密码存进你的钥匙串，下次加入同一个网络就不用再输。实测钥匙串不会把这些密码和同一台 Mac 上的其他程序隔开，介意的话可以不勾选。")
             }
         }
 
@@ -356,6 +371,9 @@ struct GeneralSettingsPage: View {
                 }
             }
             .padding(.vertical, 4)
+            LabeledContent("作者") {
+                Link("Mujh05", destination: Self.author)
+            }
             LabeledContent("项目主页") {
                 Link("在 GitHub 上查看", destination: Self.homepage)
             }

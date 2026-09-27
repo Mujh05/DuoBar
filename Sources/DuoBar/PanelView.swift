@@ -29,34 +29,41 @@ struct PanelView: View {
         return split ? 1 : 0
     }
 
+    private static var floating: Bool { MenuPanelController.floatingGlass }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: Self.floating ? 8 : 0) {
             PanelTiles(model: model, progress: splitProgress, selected: tab, onSelect: toggle)
-                .padding(.horizontal, 10)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
+                .padding(.horizontal, Self.floating ? 0 : 10)
+                .padding(.top, Self.floating ? 0 : 10)
+                .padding(.bottom, Self.floating ? 0 : 4)
 
             if let tab {
                 detail(tab)
-                    .padding(.top, 4)
+                    .panelCard()
+                    .padding(.top, Self.floating ? 0 : 4)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
             if let release = model.availableUpdate {
-                MenuDivider()
+                if !Self.floating { MenuDivider() }
                 updateRow(release)
+                    .panelCard()
             }
-            // 展开了详情时和上面隔一条线；只有胶囊时直接接在下面。
-            if tab != nil || model.availableUpdate != nil {
+            // 只有一整块底板时，按钮和上面的内容之间隔一条线；每块各自是玻璃时靠间距分开。
+            if !Self.floating, tab != nil || model.availableUpdate != nil {
                 MenuDivider()
             }
             HStack(spacing: 8) {
                 CapsuleButton(title: "设置", symbol: "gearshape", help: "打开 DuoBar 设置") { model.openSettings() }
                 CapsuleButton(title: "退出", symbol: "power", help: "退出 DuoBar") { NSApp.terminate(nil) }
             }
-            .padding(.horizontal, 10)
-            .padding(.top, 4)
+            .padding(.horizontal, Self.floating ? 0 : 10)
+            .padding(.top, Self.floating ? 0 : 4)
         }
-        .padding(.bottom, 10)
+        // 每块玻璃四周留出阴影和高光的位置。
+        .padding(.horizontal, Self.floating ? MenuPanelController.floatingInset : 0)
+        .padding(.top, Self.floating ? MenuPanelController.floatingTopInset : 0)
+        .padding(.bottom, Self.floating ? MenuPanelController.floatingInset : 10)
         .frame(width: MenuMetrics.width, alignment: .top)
         .onChange(of: model.panelVisible, initial: true) { _, visible in
             guard previewTab == nil, previewSplit == nil else { return }
@@ -311,8 +318,9 @@ private struct BatteryDetail: View {
                 }
             }
             MenuNote(text: battery.powerSourceText)
-            ForEach(battery.statusLines(limit: model.chargeLimit), id: \.self) { MenuNote(text: $0) }
-            if model.chargeLimit?.canOverride == true, battery.power != .battery {
+            ForEach(battery.statusLines(limit: model.chargeLimit, starting: model.chargeStarting,
+                                        pausedLimit: model.pausedChargeLimit), id: \.self) { MenuNote(text: $0) }
+            if model.chargeLimit?.canOverride == true, battery.power != .battery, !model.chargeStarting {
                 MenuItem(title: model.chargingToFullRequested ? "正在请求充满电…" : "立即充满电",
                          enabled: !model.chargingToFullRequested) {
                     model.chargeToFullNow()
@@ -422,6 +430,20 @@ private struct VolumeDetail: View {
             }
             MenuDivider()
             MenuItem(title: "声音设置…") { model.openSystemSettings(.sound) }
+        }
+    }
+}
+
+extension View {
+    /// macOS 26 起，面板里展开的详情和更新提示各自是一块玻璃，和控制中心展开的模块一样；
+    /// 更早的系统上整个面板是一块毛玻璃，这里不加背景。
+    @ViewBuilder
+    func panelCard() -> some View {
+        if #available(macOS 26, *) {
+            padding(.vertical, 8)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        } else {
+            self
         }
     }
 }

@@ -12,6 +12,8 @@ final class MenuPanelController: NSObject, NSWindowDelegate {
     private let panel = MenuPanel(contentRect: NSRect(x: 0, y: 0, width: MenuMetrics.width, height: 100),
                                   styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
     private let host: SizingHostingView<AnyView>
+    /// 开发时固定的深浅色；nil 时跟着菜单栏走。
+    private let fixedAppearance: NSAppearance?
     private weak var anchor: NSStatusBarButton?
     private var closing = false
     private var outsideClickMonitor: Any?
@@ -27,6 +29,7 @@ final class MenuPanelController: NSObject, NSWindowDelegate {
 
     init(rootView: some View, appearance: NSAppearance? = nil) {
         host = SizingHostingView(rootView: AnyView(rootView))
+        fixedAppearance = appearance
         super.init()
         host.sizingOptions = [.intrinsicContentSize]
         host.onSizeChange = { [weak self] in self?.fitToContent() }
@@ -35,12 +38,12 @@ final class MenuPanelController: NSObject, NSWindowDelegate {
         panel.level = .popUpMenu
         panel.backgroundColor = .clear
         panel.isOpaque = false
-        panel.hasShadow = true
+        // macOS 26 起每块玻璃自己带阴影，窗口不再画一个整体的阴影。
+        panel.hasShadow = !Self.floatingGlass
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.animationBehavior = .none
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
-        panel.appearance = appearance
         panel.delegate = self
         panel.onCancel = { [weak self] in self?.close() }
         panel.contentView = Self.background(containing: host)
@@ -48,6 +51,7 @@ final class MenuPanelController: NSObject, NSWindowDelegate {
 
     func show(below button: NSStatusBarButton) {
         anchor = button
+        panel.appearance = fixedAppearance ?? Self.menuBarAppearance(of: button)
         closing = false
         onShow?()
         host.layoutSubtreeIfNeeded()
@@ -79,6 +83,16 @@ final class MenuPanelController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// 和系统的菜单栏菜单、控制中心一样，深浅跟着菜单栏走：壁纸深、菜单栏是白字时，面板也用深色外观。
+    /// 系统本身是浅色模式也一样。
+    private static func menuBarAppearance(of button: NSStatusBarButton) -> NSAppearance? {
+        switch button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua, .vibrantLight, .vibrantDark]) {
+        case .darkAqua?, .vibrantDark?: NSAppearance(named: .darkAqua)
+        case .aqua?, .vibrantLight?: NSAppearance(named: .aqua)
+        default: nil
+        }
+    }
+
     // MARK: - 位置和大小
 
     /// 贴着菜单栏，左边和图标对齐，不超出屏幕。
@@ -89,8 +103,10 @@ final class MenuPanelController: NSObject, NSWindowDelegate {
         let icon = window.convertToScreen(button.convert(button.bounds, to: nil))
         let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? icon
         let margin: CGFloat = 6
-        let top = min(icon.minY, visible.maxY) - 5
-        let x = min(max(icon.minX, visible.minX + margin), visible.maxX - size.width - margin)
+        // 每块各自是玻璃时，四周留着透明边（见 PanelView）：窗口贴着菜单栏，往左让出这条边，玻璃和图标左边对齐。
+        let inset = Self.floatingGlass ? Self.floatingInset : 0
+        let top = min(icon.minY, visible.maxY) - (Self.floatingGlass ? 0 : 5)
+        let x = min(max(icon.minX - inset, visible.minX + margin - inset), visible.maxX - size.width - margin + inset)
         let height = min(size.height, top - visible.minY - margin)
         return NSRect(x: x, y: top - height, width: size.width, height: height)
     }
@@ -111,12 +127,19 @@ final class MenuPanelController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// macOS 26 起和控制中心一样：窗口本身透明，里面的胶囊、详情和按钮各自是一块玻璃，直接浮在桌面上。
+    /// 玻璃叠在玻璃上会发白发雾，也不会跟着背后的颜色切换文字的深浅，所以不再垫一整块底板。
+    static var floatingGlass: Bool {
+        if #available(macOS 26, *) { true } else { false }
+    }
+
+    /// 玻璃四周留给阴影和高光的透明边；上边只留 floatingTopInset，玻璃离菜单栏近一些。
+    static let floatingInset: CGFloat = 10
+    static let floatingTopInset: CGFloat = 6
+
     private static func background(containing content: NSView) -> NSView {
-        if #available(macOS 26, *) {
-            let glass = NSGlassEffectView()
-            glass.cornerRadius = cornerRadius
-            glass.contentView = content
-            return glass
+        if floatingGlass {
+            return content
         }
         let effect = NSVisualEffectView()
         effect.material = .menu

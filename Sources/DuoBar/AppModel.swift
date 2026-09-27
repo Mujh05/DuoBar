@@ -1,4 +1,5 @@
 import AppKit
+import os
 import Observation
 import ServiceManagement
 
@@ -140,6 +141,10 @@ final class AppModel {
     private(set) var chargeLimit: ChargeLimitState?
     /// 正在执行“立即充满电”。
     private(set) var chargingToFullRequested = false
+    /// 刚点了“立即充满电”，系统还没真正开始充电。系统通常要一两分钟，这段时间面板写“即将开始充电”，最多 3 分钟。
+    private(set) var chargeStarting = false
+    /// 用“立即充满电”暂停了的手动上限，恢复前在面板里注明。
+    private(set) var pausedChargeLimit: PausedChargeLimit?
     /// “立即充满电”失败的原因。
     private(set) var chargeMessage: String?
     /// 使用大量能耗的 App；还没统计出来时为 nil。
@@ -208,6 +213,8 @@ final class AppModel {
             } else {
                 wifiMessage = nil
                 chargeMessage = nil
+                // 面板收起时，没输完的密码当作取消。
+                cancelPassword()
             }
             updateWiFiScanning()
             updateEnergySampling()
@@ -252,25 +259,37 @@ final class AppModel {
     private(set) var joiningSSID: String?
     /// 最近一次 Wi-Fi 操作失败的原因。
     private(set) var wifiMessage: String?
+    /// DuoBar 记住了密码的网络。
+    private(set) var rememberedWiFi: [String] = []
+
+    /// 加入网络时每一步的结果都记到系统日志里，方便排查。
+    static let wifiLog = Logger(subsystem: "com.mujh.DuoBar", category: "wifi")
 
     /// 设置窗口打开时，所有状态都采样，方便对照。
     var settingsVisible = false {
         didSet {
             guard settingsVisible != oldValue else { return }
             refreshSources()
-            if settingsVisible { refreshLoginItem() }
+            if settingsVisible {
+                refreshLoginItem()
+                refreshRememberedWiFi()
+            }
         }
     }
 
     /// 菜单栏图标需要重画时调用。
     @ObservationIgnored var onIconChange: (() -> Void)?
     @ObservationIgnored var onOpenSettings: (() -> Void)?
-    /// 询问某个网络的密码；返回 nil 表示用户取消。
-    @ObservationIgnored var askPassword: ((String) -> String?)?
+    /// 正在等用户输入密码的网络：面板里这个网络下面会展开密码框。
+    private(set) var passwordPromptSSID: String?
+    /// 密码框上面的提示，比如上次输入的密码没能加入。
+    private(set) var passwordPromptHint: String?
+    @ObservationIgnored private var passwordReply: CheckedContinuation<(password: String, remember: Bool)?, Never>?
     /// 打开其他 App 或系统设置后收起面板。
     @ObservationIgnored var onClosePanel: (() -> Void)?
     @ObservationIgnored private var wifiScanTask: Task<Void, Never>?
     @ObservationIgnored private var chargeLimitTask: Task<Void, Never>?
+    @ObservationIgnored private var chargeStartTimeout: Task<Void, Never>?
     @ObservationIgnored private var energyTask: Task<Void, Never>?
     @ObservationIgnored private var updateTask: Task<Void, Never>?
 
@@ -520,8 +539,12 @@ final class AppModel {
         chargeLimitTask?.cancel()
         chargeLimitTask = Task { [weak self] in
             let state = await Task.detached { ChargingControl.read() }.value
-            guard !Task.isCancelled else { return }
-            self?.chargeLimit = state
+            guard !Task.isCancelled, let self else { return }
+            chargeLimit = state
+            // 上限重新生效，或者过了恢复时间，就不再注明“已暂停”。
+            if let paused = pausedChargeLimit, state?.source == .manual || Date() >= paused.until {
+                pausedChargeLimit = nil
+            }
         }
     }
 
@@ -541,9 +564,25 @@ final class AppModel {
             }.value
             guard let self else { return }
             chargingToFullRequested = false
-            if let failure { chargeMessage = "没能立即充满电：\(failure)" }
+            if let failure {
+                chargeMessage = "没能立即充满电：\(failure)"
+            } else {
+                if state.source == .manual { pausedChargeLimit = .pausing(state.limit) }
+                if battery.power != .charging { startWaitingForCharge() }
+            }
             batteryMonitor.refresh()
             refreshChargeLimit()
+        }
+    }
+
+    /// 系统接受了“立即充满电”，但电池要过一会儿才报告正在充电。
+    private func startWaitingForCharge() {
+        chargeStarting = true
+        chargeStartTimeout?.cancel()
+        chargeStartTimeout = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(180))
+            guard !Task.isCancelled else { return }
+            self?.chargeStarting = false
         }
     }
 
@@ -597,6 +636,10 @@ final class AppModel {
 
     private func apply(_ info: BatteryInfo) {
         battery = info
+        if info.power == .charging || info.power == .battery || info.isCharged {
+            chargeStarting = false
+            chargeStartTimeout?.cancel()
+        }
         refreshChargeLimit()
         setReading(.battery, .battery(info))
         setIndicator(.charging, info.power == .charging)
@@ -786,33 +829,92 @@ final class AppModel {
             openWiFiSettings()
             return
         }
-        let password: String?
-        if target.needsPassword && !target.known {
-            guard let entered = askPassword?(target.ssid) else { return }
-            password = entered
-        } else {
-            password = nil
-        }
         joiningSSID = target.ssid
         wifiMessage = nil
         Task {
-            do {
-                do {
-                    try await WiFiControl.join(ssid: target.ssid, password: password)
-                } catch where password == nil && target.needsPassword {
-                    // 系统里没有可用的密码，问一次再试。
-                    guard let entered = askPassword?(target.ssid) else { throw CancellationError() }
-                    try await WiFiControl.join(ssid: target.ssid, password: entered)
-                }
-            } catch is CancellationError {
-                // 用户取消了输入密码。
-            } catch {
-                wifiMessage = "无法加入“\(target.ssid)”：\(error.localizedDescription)"
-            }
+            await performJoin(target)
             joiningSSID = nil
             networkMonitor.refresh()
+            refreshRememberedWiFi()
             await scanWiFi()
         }
+    }
+
+    /// 加入网络：开放网络直接连；加密网络先用 DuoBar 记住的密码，没有或者不对时在面板里问。
+    /// macOS 不让 App 使用系统保存的 Wi-Fi 密码（不带密码会被拒绝，系统内部的加入接口也不对 App 开放），只能这样。
+    private func performJoin(_ target: WiFiNetwork) async {
+        guard target.needsPassword else {
+            await attemptJoin(target, password: nil, step: "开放网络")
+            return
+        }
+        if let saved = WiFiPasswords.password(for: target.ssid) {
+            if await attemptJoin(target, password: saved, step: "记住的密码") { return }
+        }
+        // 输错了就再问一次，直到加入成功或者用户取消。
+        var hint: String?
+        while let entered = await requestPassword(for: target.ssid, hint: hint) {
+            if await attemptJoin(target, password: entered.password, step: "手动输入的密码") {
+                if entered.remember { WiFiPasswords.save(entered.password, for: target.ssid) }
+                return
+            }
+            hint = "没能加入，请检查密码后再试一次"
+        }
+    }
+
+    /// 在面板里这个网络下面展开密码框，等用户输入或取消。hint 显示在密码框上面，比如上次没加入成功。
+    private func requestPassword(for ssid: String, hint: String? = nil) async -> (password: String, remember: Bool)? {
+        cancelPassword()
+        wifiMessage = nil
+        passwordPromptHint = hint
+        passwordPromptSSID = ssid
+        return await withCheckedContinuation { passwordReply = $0 }
+    }
+
+    /// 开发用：只展开密码框看样子，不会加入网络。
+    func debugShowPasswordPrompt(for ssid: String, hint: String? = nil) {
+        passwordPromptHint = hint
+        passwordPromptSSID = ssid
+    }
+
+    func submitPassword(_ password: String, remember: Bool) {
+        finishPassword(password.isEmpty ? nil : (password, remember))
+    }
+
+    func cancelPassword() {
+        finishPassword(nil)
+    }
+
+    private func finishPassword(_ result: (password: String, remember: Bool)?) {
+        let reply = passwordReply
+        passwordReply = nil
+        passwordPromptSSID = nil
+        passwordPromptHint = nil
+        reply?.resume(returning: result)
+    }
+
+    /// 试一次并记录结果；失败时把原因显示在面板里。
+    @discardableResult
+    private func attemptJoin(_ target: WiFiNetwork, password: String?, step: String) async -> Bool {
+        do {
+            try await WiFiControl.join(ssid: target.ssid, password: password)
+            Self.wifiLog.notice("加入成功：\(step, privacy: .public)")
+            wifiMessage = nil
+            return true
+        } catch {
+            Self.wifiLog.notice("加入失败（\(step, privacy: .public)）：\(error.localizedDescription, privacy: .public)")
+            wifiMessage = "无法加入“\(target.ssid)”：\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// 忘记 DuoBar 记住的所有 Wi-Fi 密码。
+    func forgetWiFiPasswords() {
+        WiFiPasswords.forgetAll()
+        refreshRememberedWiFi()
+    }
+
+    private func refreshRememberedWiFi() {
+        rememberedWiFi = WiFiPasswords.storedSSIDs()
     }
 
     func openWiFiSettings() {

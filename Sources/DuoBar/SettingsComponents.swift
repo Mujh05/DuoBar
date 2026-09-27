@@ -87,6 +87,8 @@ struct SectionNote<Accessory: View>: View {
             Text(text)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                // 表单的脚注默认把多行文字居中，这里固定左对齐。
+                .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             accessory
